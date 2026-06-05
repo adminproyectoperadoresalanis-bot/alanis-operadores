@@ -1,0 +1,14 @@
+{
+  "name": "Autotransportes Alanís",
+  "short_name": "Alanís Op",
+  "description": "Sistema de control de operadores de autotransporte",
+  "start_url": "/index.html",
+  "display": "standalone",
+  "background_color": "#F7F3EE",
+  "theme_color": "#2C1E0F",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "img/logo.webp", "sizes": "192x192", "type": "image/webp" },
+    { "src": "img/logo.webp", "sizes": "512x512", "type": "image/webp" }
+  ]
+}
