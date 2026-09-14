@@ -188,8 +188,15 @@ exports.sincronizarOperadoresAlanis = onDocumentWritten(
       }
 
       const d = after.data();
+      // nombreOficial (2026-09-14, pedido de Ivan): lo captura a mano el
+      // admin en la pantalla de "Operadores registrados" — a diferencia de
+      // "nombre" (que el propio operador auto-captura y a veces escribe con
+      // mayúsculas/minúsculas inconsistentes), nombreOficial nunca lo toca
+      // el operador. Si el admin lo dejó vacío, cae de regreso a "nombre"
+      // para no dejar el espejo sin nombre.
+      const nombreResuelto = (d.nombreOficial && d.nombreOficial.trim()) || d.nombre || null;
       await mirrorRef.set({
-        nombre: d.nombre || null,
+        nombre: nombreResuelto,
         numero: d.numero || null,
         activo: true,
       });

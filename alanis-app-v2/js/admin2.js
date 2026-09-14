@@ -1,4 +1,3 @@
-
 // ── GENERADOR DE FOLIO OT ──────────────────────────────────────
 async function generarFolioOT() {
   const anio = new Date().getFullYear();
@@ -553,14 +552,29 @@ function renderAsignaciones(lista) {
 
 
 // ── GESTION DE OPERADORES ─────────────────────────────────────
+let operadoresCache = [];
+
 async function cargarOperadores() {
   try {
     const snap = await firebase.firestore().collection('usuarios')
       .where('rol', '==', 'operador').get();
     const lista = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
     lista.sort(function(a, b) { return (a.nombre || '').localeCompare(b.nombre || ''); });
+    operadoresCache = lista;
     renderOperadores(lista);
   } catch(e) { console.error('Error operadores:', e); }
+}
+
+// Escapa un valor antes de meterlo en un atributo HTML (value="...",
+// placeholder="...") — el resto del archivo no escapaba nada (riesgo ya
+// existente), pero el nombre oficial lo captura el admin a mano y es fácil
+// que alguien meta una comilla o un acento raro, así que aquí sí.
+function escAttrAdmin(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function renderOperadores(lista) {
@@ -575,14 +589,29 @@ function renderOperadores(lista) {
     const activoBadge = o.activo
       ? '<span class="badge" style="background:#E8F5E9;color:#2E7D32">Activo</span>'
       : '<span class="badge" style="background:#FFEBEE;color:#C62828">Inactivo</span>';
+    // Nombre oficial (2026-09-14, pedido de Ivan): el operador auto-captura
+    // su "nombre" al registrarse y a veces lo escribe con mayúsculas/
+    // minúsculas inconsistentes. nombreOficial es un campo aparte que solo
+    // el admin toca aquí — nunca lo pisa el login del operador — y es el
+    // que se refleja hacia ADREMATASA Interno (vía operadores_alanis). Si
+    // queda vacío, la Cloud Function usa "nombre" como respaldo.
+    const tieneOficial = !!(o.nombreOficial && o.nombreOficial.trim());
+    const oficialBadge = tieneOficial
+      ? '<span class="badge" style="background:#E8F5E9;color:#2E7D32;font-size:10px">✓ Nombre oficial</span>'
+      : '<span class="badge" style="background:#FFF3E0;color:#E65100;font-size:10px">Sin nombre oficial</span>';
     return '<div class="card">' +
-      '<div class="op-row" style="padding:0;border:none;margin-bottom:12px">' +
+      '<div class="op-row" style="padding:0;border:none;margin-bottom:8px">' +
       '<div class="op-avatar">' + initials + '</div>' +
       '<div style="flex:1">' +
       '<div class="op-name">' + (o.nombre || '—') + '</div>' +
       '<div class="op-sub">' + (o.correo || '—') + '</div>' +
       '</div>' +
       activoBadge +
+      '</div>' +
+      '<div style="margin-bottom:4px">' + oficialBadge + '</div>' +
+      '<div class="form-group" style="margin-bottom:8px">' +
+      '<label style="font-size:11px;color:var(--text-muted)">Nombre oficial (el que verá el cliente en ADREMATASA)</label>' +
+      '<input type="text" id="nombreoficial-' + o.id + '" value="' + escAttrAdmin(o.nombreOficial || '') + '" placeholder="' + escAttrAdmin(o.nombre || 'Ej: Juan Pérez López') + '" style="font-size:14px;width:100%"/>' +
       '</div>' +
       '<div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">' +
       '<input type="text" id="unidad-' + o.id + '" value="' + (o.numero || '') + '" placeholder="1121" maxlength="6" style="width:64px;font-size:14px;font-weight:700;text-align:center;padding:6px 4px"/>' +
@@ -591,7 +620,7 @@ function renderOperadores(lista) {
       '<option value="1"'  + ((o.lada||'')==='1'  ?' selected':'') + '>US+1</option>'  +
       '</select>' +
       '<input type="tel" id="tel-' + o.id + '" value="' + (o.telefono || '') + '" placeholder="10 digitos" maxlength="10" style="flex:1;min-width:90px;font-size:13px;padding:6px 8px"/>' +
-      '<button onclick="guardarDatosOperador(\'' + o.id + '\',\'' + (o.numero||'') + '\')" style="padding:6px 10px;font-size:15px;background:var(--brand);color:#fff;border:none;border-radius:8px;cursor:pointer" title="Guardar unidad y teléfono">💾</button>' +
+      '<button onclick="guardarDatosOperador(\'' + o.id + '\',\'' + (o.numero||'') + '\')" style="padding:6px 10px;font-size:15px;background:var(--brand);color:#fff;border:none;border-radius:8px;cursor:pointer" title="Guardar nombre oficial, unidad y teléfono">💾</button>' +
       '</div>' +
       '<div style="display:flex;gap:6px;align-items:center">' +
       (o.activo
@@ -605,13 +634,27 @@ function renderOperadores(lista) {
   }).join('');
 }
 
+function filtrarOperadores() {
+  const inputEl = document.getElementById('buscar-operador');
+  const q = ((inputEl ? inputEl.value : '') || '').trim().toLowerCase();
+  if (!q) { renderOperadores(operadoresCache); return; }
+  const filtrada = operadoresCache.filter(function(o) {
+    return (o.nombre || '').toLowerCase().indexOf(q) !== -1 ||
+           (o.correo || '').toLowerCase().indexOf(q) !== -1 ||
+           String(o.numero || '').toLowerCase().indexOf(q) !== -1;
+  });
+  renderOperadores(filtrada);
+}
+
 async function guardarDatosOperador(uid, unidadAnterior) {
   const unidadEl = document.getElementById('unidad-' + uid);
   const ladaEl   = document.getElementById('lada-' + uid);
   const telEl    = document.getElementById('tel-' + uid);
+  const nombreOficialEl = document.getElementById('nombreoficial-' + uid);
   const nuevaUnidad = unidadEl ? unidadEl.value.trim() : '';
   const lada        = ladaEl ? ladaEl.value : '52';
   const tel         = telEl ? telEl.value.trim().replace(/\D/g, '') : '';
+  const nuevoNombreOficial = nombreOficialEl ? nombreOficialEl.value.trim() : '';
 
   // Validar unidad
   if (!nuevaUnidad) { showToast('Ingresa un número de unidad', true); return; }
@@ -635,7 +678,11 @@ async function guardarDatosOperador(uid, unidadAnterior) {
   }
 
   try {
-    const update = { numero: nuevaUnidad };
+    // nombreOficial se guarda siempre, incluso vacío ("") — así, si el admin
+    // borra el campo, queda limpio en Firestore y la Cloud Function vuelve a
+    // caer en el nombre auto-capturado por el operador (ver comentario en
+    // renderOperadores).
+    const update = { numero: nuevaUnidad, nombreOficial: nuevoNombreOficial };
     if (tel !== '') { update.lada = lada; update.telefono = tel; }
 
     await firebase.firestore().collection('usuarios').doc(uid).update(update);

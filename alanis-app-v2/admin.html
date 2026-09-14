@@ -62,7 +62,8 @@
 
 <div class="page-content hidden" id="tab-operadores">
   <p class="section-label">Operadores registrados <span id="operadores-titulo-count" style="background:#378ADD;color:#fff;border-radius:20px;padding:2px 10px;font-size:12px;font-weight:700;margin-left:6px;vertical-align:middle">0</span></p>
-  <div id="operadores-list"></div>
+  <input type="text" id="buscar-operador" placeholder="Buscar por nombre, correo o unidad..." oninput="filtrarOperadores()" style="width:100%;padding:10px 12px;font-size:14px;border:0.5px solid var(--border-strong);border-radius:8px;background:var(--bg-app);color:var(--text-primary);margin-bottom:12px"/>
+    <div id="operadores-list"></div>
 </div>
 
 <div class="page-content hidden" id="tab-asignaciones">
@@ -142,6 +143,6 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="js/data.js?v=5"></script>
-<script src="js/admin2.js?v=25"></script>
+<script src="js/admin2.js?v=26"></script>
 </body>
 </html>
