@@ -8,6 +8,133 @@
   <title>Autotransportes Alanís — Operador</title>
   <link rel="stylesheet" href="css/main.css"/>
   <link rel="manifest" href="manifest.json"/>
+  <style>
+    .status-category { font-size:10px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.8px; margin:14px 0 8px; padding-left:2px; }
+    .status-option { display:flex; align-items:center; gap:12px; padding:13px 14px; background:var(--bg-card); border:0.5px solid var(--border); border-radius:var(--radius); margin-bottom:8px; cursor:pointer; transition:border-color 0.15s, background 0.15s; -webkit-tap-highlight-color:transparent; }
+    .status-option:active { background:var(--brand-pale); }
+    .status-option.selected { border:1.5px solid var(--brand-light); background:var(--brand-pale); }
+    .dark-mode .status-option.selected { background:#3D2B15; border-color:var(--brand-silver); }
+    .status-dot { width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+    .status-label { font-size:14px; font-weight:600; color:var(--text-primary); }
+    .status-desc  { font-size:12px; color:var(--text-muted); margin-top:1px; }
+    .radio-circle { width:20px; height:20px; border-radius:50%; border:1.5px solid var(--border-strong); margin-left:auto; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .status-option.selected .radio-circle { border-color:var(--brand-light); background:var(--brand-light); }
+    .status-option.selected .radio-circle::after { content:''; width:6px; height:6px; border-radius:50%; background:#fff; }
+
+    .extra-inline { background:var(--bg-app); border-left:3px solid var(--brand-light); border-radius:0 8px 8px 0; padding:12px 14px; margin:0 0 8px 24px; }
+    .extra-inline.hidden { display:none; }
+    .extra-inline .form-group { margin-bottom:10px; }
+    .extra-inline .form-group:last-child { margin-bottom:0; }
+    .extra-inline { background:var(--bg-app); border-left:3px solid var(--brand-light); border-radius:0 8px 8px 0; padding:12px 14px; margin:0 0 8px 24px; }
+    .extra-inline.hidden { display:none; }
+    .extra-inline .form-group { margin-bottom:10px; }
+    .extra-inline .form-group:last-child { margin-bottom:0; }
+    .extra-fields { background:var(--bg-card); border:0.5px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:10px; display:none; }
+    .extra-fields.visible { display:block; }
+    .extra-fields .form-group { margin-bottom:10px; }
+    .extra-fields .form-group:last-child { margin-bottom:0; }
+
+    .datetime-display { display:flex; align-items:center; gap:8px; background:var(--bg-card); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:14px; }
+    .datetime-display svg { color:var(--brand-light); width:16px; height:16px; flex-shrink:0; }
+    .datetime-text { font-size:14px; color:var(--text-primary); font-weight:500; }
+
+    .ultimo-estatus { background:var(--bg-card); border:0.5px solid var(--border); border-radius:var(--radius); padding:12px 14px; margin-bottom:14px; }
+    .ultimo-estatus-label { font-size:11px; color:var(--text-muted); margin-bottom:4px; }
+    .ultimo-estatus-valor { display:flex; align-items:center; gap:8px; font-size:14px; font-weight:600; color:var(--text-primary); }
+
+    .qr-btn { width:100%; padding:11px; background:transparent; color:var(--text-secondary); border:0.5px dashed var(--border-strong); border-radius:var(--radius-sm); font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:12px; }
+    .qr-btn:hover { background:var(--brand-pale); }
+    .qr-result { font-size:12px; color:var(--green); background:var(--green-bg); padding:6px 10px; border-radius:6px; margin-bottom:10px; display:none; }
+
+    .historial-timeline { position:relative; padding-left:20px; }
+    .historial-timeline::before { content:''; position:absolute; left:6px; top:0; bottom:0; width:1px; background:var(--border); }
+    .timeline-item { position:relative; margin-bottom:14px; }
+    .timeline-dot { position:absolute; left:-17px; top:4px; width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .timeline-time { font-size:11px; color:var(--text-muted); margin-bottom:2px; }
+    .timeline-status { font-size:14px; font-weight:600; color:var(--text-primary); }
+    .timeline-detail { font-size:12px; color:var(--text-secondary); margin-top:2px; }
+    .camino-btn { display:flex; align-items:center; gap:14px; background:var(--bg-card); border:0.5px solid var(--border-strong); border-radius:var(--radius); padding:18px 16px; margin-bottom:12px; cursor:pointer; transition:all 0.15s; }
+    .camino-btn:active { transform:scale(0.98); background:var(--bg-app); }
+    .camino-icon { font-size:28px; }
+    .camino-text { flex:1; }
+    .camino-title { font-size:17px; font-weight:700; color:var(--text-primary); letter-spacing:0.5px; }
+    .camino-sub { font-size:11px; color:var(--text-muted); margin-top:3px; line-height:1.3; }
+    .camino-arrow { font-size:24px; color:var(--text-muted); font-weight:300; }
+    .btn-regresar { background:none; border:none; color:var(--brand-light); font-size:14px; font-weight:600; padding:8px 0; margin-bottom:8px; cursor:pointer; }
+    .btn-regresar:active { opacity:0.6; }
+    #reporte-flotante.flotante {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      bottom: 80px;
+      z-index: 50;
+    }
+    #reporte-flotante.flotante #btn-reporte {
+      width: 100%;
+      border-radius: 24px;
+      box-shadow: 0 4px 14px rgba(44,30,15,0.4);
+      margin: 0;
+    }
+    #resumen-estatus {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-card);
+      border: 0.5px solid var(--border-strong);
+      border-radius: 12px;
+      padding: 8px 14px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+    }
+    .resumen-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #888;
+      flex-shrink: 0;
+    }
+
+    /* ── Documentación (checkpoints QR/CFDI McCain) ─────────────── */
+    .doc-btn { display:flex; align-items:center; gap:14px; background:var(--bg-card); border:0.5px solid var(--border-strong); border-radius:var(--radius); padding:18px 16px; margin-bottom:12px; cursor:pointer; transition:all 0.15s; }
+    .doc-btn:active { transform:scale(0.98); background:var(--bg-app); }
+    .doc-btn-icon { font-size:28px; }
+    .doc-btn-text { flex:1; }
+    .doc-btn-title { font-size:16px; font-weight:700; color:var(--text-primary); }
+    .doc-btn-sub { font-size:12px; color:var(--text-muted); margin-top:3px; line-height:1.3; }
+    .doc-btn-arrow { font-size:24px; color:var(--text-muted); font-weight:300; }
+
+    .doc-excepcion-link { display:flex; align-items:center; justify-content:center; gap:6px; text-align:center; font-size:12.5px; color:var(--text-muted); padding:2px 8px 18px; cursor:pointer; }
+    .doc-excepcion-link strong { color:#92400E; font-weight:700; }
+    .doc-excepcion-link:active { opacity:0.6; }
+
+    .doc-modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:200; display:flex; align-items:center; justify-content:center; padding:16px; }
+    .doc-modal-overlay.hidden { display:none; }
+    .doc-modal-card { background:var(--bg-card); border-radius:16px; padding:20px; width:100%; max-width:420px; max-height:90vh; overflow-y:auto; }
+    .doc-modal-card h2 { font-size:17px; margin:0 0 8px; color:var(--text-primary); }
+    .doc-modal-nota { font-size:12px; color:var(--text-muted); margin:0 0 12px; line-height:1.4; }
+    .doc-modal-error { color:#C0392B; font-size:13px; margin-bottom:10px; min-height:1px; }
+    #doc-qr-reader { width:100%; border-radius:10px; overflow:hidden; background:#000; min-height:220px; }
+    .doc-modal-actions { display:flex; gap:10px; margin-top:16px; }
+    .doc-modal-actions button { flex:1; }
+
+    .doc-info-box { background:var(--bg-app); border:0.5px solid var(--border); border-radius:var(--radius-sm); padding:12px 14px; margin-bottom:0; font-size:14px; color:var(--text-primary); line-height:1.8; }
+    .doc-info-box strong { color:var(--text-secondary); font-weight:600; }
+
+    .doc-resultado-overlay { position:fixed; inset:0; z-index:300; display:flex; align-items:center; justify-content:center; padding:24px; text-align:center; overflow-y:auto; }
+    .doc-resultado-overlay.hidden { display:none; }
+    .doc-resultado-overlay.exito { background:#1F8A3B; }
+    .doc-resultado-overlay.discrepancia { background:#C0392B; animation: docParpadeo 1s infinite; }
+    @keyframes docParpadeo { 0%,100% { background:#C0392B; } 50% { background:#8E2418; } }
+    .doc-resultado-icono { width:72px; height:72px; margin:0 auto 16px; color:#fff; }
+    .doc-resultado-icono svg { width:100%; height:100%; }
+    .doc-resultado-titulo { font-size:22px; font-weight:800; color:#fff; margin:0 0 12px; letter-spacing:0.3px; }
+    .doc-resultado-detalle { font-size:16px; color:#fff; margin:0 0 20px; line-height:1.5; white-space:pre-line; }
+    .doc-resultado-tel { display:block; font-size:16px; font-weight:700; color:#fff; background:rgba(255,255,255,0.18); border-radius:10px; padding:10px 14px; margin-bottom:8px; text-decoration:none; }
+    .doc-resultado-btn { margin-top:8px; background:#fff; color:#2C1E0F; border:none; border-radius:10px; padding:14px; font-size:15px; font-weight:700; width:100%; max-width:360px; cursor:pointer; }
+  </style>
 </head>
 <body>
 <header class="app-header">
@@ -25,69 +152,302 @@
     </button>
   </div>
 </header>
+
+<!-- TAB ESTATUS -->
 <div class="page-content" id="tab-reporte">
-  <div class="date-chip">
+
+  <div class="datetime-display">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-    <span id="fecha-hoy"></span>
+    <span class="datetime-text" id="fecha-hora-display">—</span>
   </div>
-  <div id="ya-reportado" class="alert alert-success hidden">✅ Ya enviaste tu reporte de disponibilidad hoy.</div>
-  <p class="section-label">Selecciona tu estatus del día</p>
-  <div id="status-list"></div>
-  <button class="btn-primary mt-12" id="btn-reporte" onclick="enviarReporte()">Enviar reporte de disponibilidad</button>
-</div>
-<div class="page-content hidden" id="tab-ot">
-  <div class="card mb-12">
-    <div class="card-title">Nueva orden de trabajo</div>
-    <div class="form-group">
-      <label>Número económico de la unidad</label>
-      <input type="text" id="ot-unidad" placeholder="Ej: T-142"/>
+
+  <div class="ultimo-estatus" id="ultimo-estatus-box" style="display:none">
+    <div class="ultimo-estatus-label">Último estatus reportado</div>
+    <div class="ultimo-estatus-valor">
+      <span class="status-dot" id="ultimo-dot" style="background:#888"></span>
+      <span id="ultimo-label">—</span>
+      <span style="font-size:11px;color:var(--text-muted);margin-left:auto" id="ultimo-hora">—</span>
     </div>
   </div>
-  <div id="selected-tags-box" class="selected-tags-box hidden">
-    <div class="selected-tags-title">Fallas seleccionadas — toca para quitar</div>
-    <div class="tags-wrap" id="selected-tags"></div>
+
+  <!-- QR Scanner -->
+  <button class="qr-btn" onclick="escanearQR()">
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
+    Escanear QR de viaje (opcional)
+  </button>
+  <div class="qr-result" id="qr-result">
+    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+    Viaje vinculado: <strong id="qr-id-display"></strong>
   </div>
-  <div class="row-between">
-    <p class="section-label" style="margin-bottom:0">Catálogo de fallas</p>
-    <span class="text-muted">Sel: <strong id="falla-count" style="color:var(--brand-light)">0</strong></span>
+
+  <!-- NIVEL 1: SELECCION -->
+  <div id="nivel-seleccion">
+    <p class="section-label">Selecciona tu estatus</p>
+    <div class="camino-btn" onclick="mostrarNivel('patio')">
+      <span class="camino-icon">📍</span>
+      <div class="camino-text"><div class="camino-title">PATIO NLD</div><div class="camino-sub">Disponible, Taller, Enfermo, Permiso, Vacaciones, Incapacitado</div></div>
+      <span class="camino-arrow">›</span>
+    </div>
+    <div class="camino-btn" onclick="mostrarNivel('viaje')">
+      <span class="camino-icon">🚛</span>
+      <div class="camino-text"><div class="camino-title">VIAJE</div><div class="camino-sub">Incidencia, Arribo a destino, Fin de descarga</div></div>
+      <span class="camino-arrow">›</span>
+    </div>
   </div>
-  <div class="search-wrap">
-    <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input class="search-input" type="text" id="search-falla" placeholder="Buscar falla..." oninput="renderFallas()"/>
+  <!-- NIVEL 2: PATIO -->
+  <div id="nivel-patio" class="hidden">
+    <button class="btn-regresar" onclick="mostrarNivel('seleccion')">← Regresar</button>
+    <div class="status-category">📍 Patio NLD</div>
+    <div id="status-patio"></div>
   </div>
-  <div id="falla-list"></div>
-  <button class="btn-primary mt-8" id="btn-ot" onclick="enviarOT()">Crear orden de trabajo</button>
-  <p class="section-label mt-16">Mis órdenes de trabajo</p>
-  <div id="mis-ots"></div>
+  <!-- NIVEL 2: VIAJE -->
+  <div id="nivel-viaje" class="hidden">
+    <button class="btn-regresar" onclick="mostrarNivel('seleccion')">← Regresar</button>
+    <div class="status-category">🚛 Viaje</div>
+    <div id="status-viaje"></div>
+  </div>
+
+  <!-- CAMPOS EXTRA -->
+  <div class="extra-fields" id="extra-taller">
+    <p style="font-size:13px;color:var(--text-secondary);margin-bottom:10px">Selecciona las fallas de tu unidad:</p>
+    <div class="search-wrap">
+      <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <input class="search-input" type="text" id="search-falla-inline" placeholder="Buscar falla..." oninput="renderFallasInline()"/>
+    </div>
+    <div id="falla-list-inline" style="max-height:220px;overflow-y:auto"></div>
+    <div id="selected-tags-inline" style="margin-top:8px"></div>
+  </div>
+
+  <div class="extra-fields" id="extra-enfermo">
+    <div class="form-group">
+      <label>Número de control médico</label>
+      <input type="text" id="enfermo-control" placeholder="Ej: MED-2024-001"/>
+    </div>
+    <div class="form-group">
+      <label>Días estimados de incapacidad</label>
+      <input type="number" id="enfermo-dias" placeholder="Ej: 3" min="1"/>
+    </div>
+  </div>
+
+  <div class="extra-fields" id="extra-permiso">
+    <div class="form-group">
+      <label>Autorizado por</label>
+      <input type="text" id="permiso-autorizo" placeholder="Nombre del supervisor"/>
+    </div>
+    <div class="form-group">
+      <label>Fecha estimada de regreso</label>
+      <input type="date" id="permiso-regreso"/>
+    </div>
+  </div>
+
+  <div class="extra-fields" id="extra-vacaciones">
+    <div class="form-group">
+      <label>Autorizado por</label>
+      <input type="text" id="vac-autorizo" placeholder="Nombre del supervisor"/>
+    </div>
+    <div class="form-group">
+      <label>Fecha de inicio</label>
+      <input type="date" id="vac-inicio"/>
+    </div>
+    <div class="form-group">
+      <label>Fecha de regreso</label>
+      <input type="date" id="vac-fin"/>
+    </div>
+  </div>
+
+  <div class="extra-fields" id="extra-incapacitado">
+    <div class="form-group">
+      <label>Folio IMSS</label>
+      <input type="text" id="imss-folio" placeholder="Folio del documento IMSS"/>
+    </div>
+    <div class="form-group">
+      <label>Foto del documento IMSS</label>
+      <input type="file" id="imss-foto" accept="image/*" capture="environment" style="font-size:13px"/>
+    </div>
+  </div>
+
+  <div class="extra-fields" id="extra-incidencia">
+    <div class="form-group">
+      <label>Descripción de la incidencia</label>
+      <textarea id="incidencia-desc" placeholder="Describe brevemente la incidencia..." rows="3" style="width:100%;padding:10px;font-size:14px;border:0.5px solid var(--border-strong);border-radius:8px;background:var(--bg-app);color:var(--text-primary);resize:none;font-family:inherit"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Foto (opcional)</label>
+      <input type="file" id="incidencia-foto" accept="image/*" capture="environment" style="font-size:13px"/>
+    </div>
+  </div>
+
+  <div id="reporte-flotante" class="hidden">
+    <div id="resumen-estatus">
+      <span class="resumen-dot" id="resumen-dot"></span>
+      <span id="resumen-texto">—</span>
+    </div>
+    <button class="btn-primary" id="btn-reporte" onclick="enviarReporte()">
+      Enviar estatus
+    </button>
+  </div>
 </div>
+
+<!-- TAB ASIGNACIONES -->
+<div class="page-content hidden" id="tab-asignaciones">
+  <p class="section-label">Mis asignaciones</p>
+  <div id="asignaciones-op-list"></div>
+</div>
+<!-- TAB HISTORIAL -->
 <div class="page-content hidden" id="tab-historial">
-  <p class="section-label">Mis reportes recientes</p>
-  <div id="historial-list"></div>
+  <p class="section-label">Mi historial de hoy</p>
+  <div class="historial-timeline" id="historial-list"></div>
+  <p style="text-align:center;font-size:11px;color:var(--text-muted);margin-top:20px" id="footer-version"></p>
 </div>
+<!-- TAB DOCUMENTACION -->
+<div class="page-content hidden" id="tab-documentacion">
+  <p class="section-label">Escanear documentación</p>
+  <div class="doc-btn" onclick="abrirEscaneoDocumentacion('recepcion')">
+    <span class="doc-btn-icon">📥</span>
+    <div class="doc-btn-text">
+      <div class="doc-btn-title">Checkpoint 1 · Despacho</div>
+      <div class="doc-btn-sub">Al recibir los documentos de despacho, escanea el QR de la factura.</div>
+    </div>
+    <span class="doc-btn-arrow">›</span>
+  </div>
+  <div class="doc-excepcion-link" onclick="abrirExcepcion('recepcion')">¿No puedes escanear? <strong>Excepción</strong></div>
+
+  <div class="doc-btn" onclick="abrirEscaneoDocumentacion('pre_entrega')">
+    <span class="doc-btn-icon">🚚</span>
+    <div class="doc-btn-text">
+      <div class="doc-btn-title">Checkpoint 2 · Pre-entrega</div>
+      <div class="doc-btn-sub">Antes de presentarte con el cliente, vuelve a escanear el QR de la factura.</div>
+    </div>
+    <span class="doc-btn-arrow">›</span>
+  </div>
+  <div class="doc-excepcion-link" onclick="abrirExcepcion('pre_entrega')">¿No puedes escanear? <strong>Excepción</strong></div>
+</div>
+
+<!-- NAV -->
 <nav class="bottom-nav">
   <button class="nav-item active" id="nav-reporte" onclick="switchTab('reporte')">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-    Reporte
+    Estatus
   </button>
-  <button class="nav-item" id="nav-ot" onclick="switchTab('ot')">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-    Orden de trabajo
-    <span class="nav-badge hidden" id="ot-badge">0</span>
+  <button class="nav-item" id="nav-asignaciones" onclick="switchTab('asignaciones')">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 0 1 0 10h-2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+    Asignaciones
+    <span class="nav-badge hidden" id="asig-op-badge">0</span>
+  </button>
+  <button class="nav-item" id="nav-documentacion" onclick="switchTab('documentacion')">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/></svg>
+    Documentación
   </button>
   <button class="nav-item" id="nav-historial" onclick="switchTab('historial')">
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
     Historial
   </button>
 </nav>
+
+<!-- TOAST -->
 <div class="toast" id="toast">
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
   <span id="toast-msg"></span>
 </div>
+
+<!-- MODAL ESCANEO DOCUMENTACION (checkpoints QR/CFDI) -->
+<div class="doc-modal-overlay hidden" id="doc-modal">
+  <div class="doc-modal-card">
+    <h2 id="doc-modal-titulo">Escanear CFDI</h2>
+    <p class="doc-modal-nota" id="doc-modal-nota"></p>
+    <div class="doc-modal-error" id="doc-modal-error"></div>
+
+    <div id="doc-modal-captura">
+      <div id="doc-qr-reader"></div>
+      <p class="doc-modal-nota" id="doc-camara-estado" style="margin-top:8px">Apunta la cámara al código QR de la factura.</p>
+    </div>
+
+    <div id="doc-modal-confirmar" class="hidden">
+      <div class="doc-info-box" id="doc-info-embarque"></div>
+      <div class="doc-modal-actions">
+        <button class="btn-secondary" onclick="volverAEscanearDoc()">Volver a escanear</button>
+        <button class="btn-primary" id="doc-btn-confirmar" onclick="confirmarRegistroDoc()">Confirmar y registrar</button>
+      </div>
+    </div>
+
+    <div id="doc-modal-no-encontrado" class="hidden">
+      <div class="doc-info-box" id="doc-no-encontrado-msg">No se encontró este documento validado todavía.<br><br>Verifica con Atención al Cliente / Operaciones que ya escanearon este CFDI — si acaban de validarlo, puede tardar unos minutos en sincronizar.</div>
+      <div class="doc-modal-actions">
+        <button class="btn-secondary" onclick="volverAEscanearDoc()">Volver a escanear</button>
+        <button class="btn-primary" onclick="cerrarModalDoc()">Cerrar</button>
+      </div>
+    </div>
+
+    <div class="doc-modal-actions" id="doc-modal-cancelar-wrap">
+      <button class="btn-secondary" onclick="cerrarModalDoc()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL EXCEPCION (checkpoints QR/CFDI, embarques SIN FACTURA) -->
+<div class="doc-modal-overlay hidden" id="excepcion-modal">
+  <div class="doc-modal-card">
+    <h2 id="excepcion-modal-titulo">Excepción</h2>
+    <p class="doc-modal-nota">Disponible solo para tu embarque asignado sin factura, cuando la cámara, la luz o la impresión no permiten escanear.</p>
+    <div class="doc-modal-error" id="excepcion-modal-error"></div>
+
+    <div id="excepcion-buscando">
+      <p class="doc-modal-nota">Buscando tu embarque asignado…</p>
+    </div>
+
+    <div id="excepcion-no-encontrado" class="hidden">
+      <div class="doc-info-box">No tienes ningún embarque sin factura asignado pendiente en este checkpoint.</div>
+      <div class="doc-modal-actions">
+        <button class="btn-primary" onclick="cerrarExcepcion()">Cerrar</button>
+      </div>
+    </div>
+
+    <div id="excepcion-seleccion" class="hidden">
+      <p class="doc-modal-nota">Tienes más de un embarque sin factura pendiente. Selecciona el correcto:</p>
+      <div id="excepcion-lista"></div>
+    </div>
+
+    <div id="excepcion-confirmar" class="hidden">
+      <div class="doc-info-box" id="excepcion-info-embarque"></div>
+      <div class="form-group" style="margin-top:12px">
+        <label>Motivo (opcional)</label>
+        <select id="excepcion-motivo">
+          <option value="">Selecciona un motivo</option>
+          <option value="camara">No funciona la cámara</option>
+          <option value="luz">Falta de luz / iluminación</option>
+          <option value="impresion">Impresión ilegible o dañada</option>
+          <option value="otro">Otro</option>
+        </select>
+      </div>
+      <div class="doc-modal-actions">
+        <button class="btn-secondary" onclick="cerrarExcepcion()">Cancelar</button>
+        <button class="btn-primary" id="excepcion-btn-confirmar" onclick="confirmarExcepcion()">Confirmar excepción</button>
+      </div>
+    </div>
+
+    <div class="doc-modal-actions" id="excepcion-cancelar-wrap">
+      <button class="btn-secondary" onclick="cerrarExcepcion()">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- RESULTADO ESCANEO DOCUMENTACION (pantalla completa) -->
+<div class="doc-resultado-overlay hidden" id="doc-resultado">
+  <div>
+    <div class="doc-resultado-icono" id="doc-resultado-icono"></div>
+    <div class="doc-resultado-titulo" id="doc-resultado-titulo"></div>
+    <div class="doc-resultado-detalle" id="doc-resultado-detalle"></div>
+    <div id="doc-resultado-telefonos"></div>
+    <button class="doc-resultado-btn" id="doc-resultado-btn" onclick="cerrarResultadoDoc()">Continuar</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
-<script src="js/data.js"></script>
-<script src="js/operador.js"></script>
+<script src="js/data.js?v=5"></script>
+<script src="js/operador4.js?v=12"></script>
 </body>
 </html>

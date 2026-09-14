@@ -1,74 +1,65 @@
-// ============================================================
-// AUTOTRANSPORTES ALANÍS — Autenticación con Google
-// ============================================================
+// AUTOTRANSPORTES ALANIS - Auth v15
 
-const provider = new firebase.auth.GoogleAuthProvider();
-// Forzar selección de cuenta cada vez (útil si hay varios usuarios en el celular)
-provider.setCustomParameters({ prompt: 'select_account' });
+let verificando = false;
 
-// ── Si ya tiene sesión activa, redirigir directo ──────────────
-auth.onAuthStateChanged(async user => {
-  if (!user) return; // Sin sesión, quedarse en login
-
+async function verificarAcceso(user) {
+  if (verificando) return;
+  verificando = true;
   try {
-    const doc = await db.collection('usuarios').doc(user.uid).get();
-
-    if (!doc.exists) {
-      // Usuario autenticado con Google pero NO registrado en el sistema
-      mostrarError(
-        `Tu correo <strong>${user.email}</strong> no está registrado en el sistema. ` +
-        `Contacta a tu supervisor para que te den acceso.`
-      );
-      auth.signOut();
+    const doc = await firebase.firestore().collection('usuarios').doc(user.uid).get();
+    if (doc.exists && doc.data().activo === true) {
+      const rol = doc.data().rol;
+      window.location.replace(['admin','superadmin','supervisor'].includes(rol) ? 'admin.html' : 'operador.html');
       return;
     }
-
-    const rol = doc.data().rol;
-    if (rol === 'admin' || rol === 'supervisor') {
-      window.location.href = 'admin.html';
+    // No existe en usuarios — guardar solicitud
+    await guardarSolicitud(user);
+  } catch(e) {
+    if (e.code === 'permission-denied') {
+      // Usuario nuevo sin acceso — guardar solicitud
+      await guardarSolicitud(user);
     } else {
-      window.location.href = 'operador.html';
+      console.error('ERROR:', e.code, e.message);
+      verificando = false;
     }
-  } catch (e) {
-    mostrarError('Error al verificar tu acceso. Intenta de nuevo.');
-    auth.signOut();
   }
+}
+
+async function guardarSolicitud(user) {
+  try {
+    await firebase.firestore().collection('solicitudes').doc(user.uid).set({
+      uid: user.uid,
+      nombre: user.displayName || '',
+      correo: user.email || '',
+      estado: 'pendiente',
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    window.location.replace('pendiente.html');
+  } catch(e) {
+    console.error('Error guardando solicitud:', e.code, e.message);
+    window.location.replace('pendiente.html');
+  }
+}
+
+firebase.auth().onAuthStateChanged(user => {
+  if (!user) return;
+  verificarAcceso(user);
 });
 
-// ── Login con Google ──────────────────────────────────────────
 async function loginGoogle() {
-  const btn = document.getElementById('btn-google');
-  const loading = document.getElementById('loading');
-
-  btn.disabled = true;
-  loading.classList.add('show');
-  ocultarError();
-
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   try {
-    await auth.signInWithPopup(provider);
-    // onAuthStateChanged se encargará del redireccionamiento
-  } catch (err) {
-    btn.disabled = false;
-    loading.classList.remove('show');
-
-    const msgs = {
-      'auth/popup-closed-by-user':     'Cerraste la ventana de Google antes de completar.',
-      'auth/popup-blocked':            'El navegador bloqueó la ventana. Permite popups e intenta de nuevo.',
-      'auth/cancelled-popup-request':  'Inicio cancelado. Intenta de nuevo.',
-      'auth/network-request-failed':   'Sin conexión a internet. Verifica tu red.',
-      'auth/unauthorized-domain':      'Dominio no autorizado. Contacta al administrador.',
-    };
-    mostrarError(msgs[err.code] || `Error: ${err.message}`);
+    const result = await firebase.auth().signInWithPopup(provider);
+    await verificarAcceso(result.user);
+  } catch(err) {
+    if (err.code === 'auth/popup-blocked' || err.code === 'auth/cancelled-popup-request') {
+      firebase.auth().signInWithRedirect(provider);
+    } else {
+      document.getElementById('btn-google').disabled = false;
+      document.getElementById('loading').classList.remove('show');
+      document.getElementById('login-error').innerHTML = 'Error: ' + err.message;
+      document.getElementById('login-error').style.display = 'block';
+    }
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-function mostrarError(msg) {
-  const el = document.getElementById('login-error');
-  el.innerHTML = msg;
-  el.style.display = 'block';
-}
-
-function ocultarError() {
-  document.getElementById('login-error').style.display = 'none';
 }

@@ -1,0 +1,1226 @@
+
+// ── GENERADOR DE FOLIO OT ──────────────────────────────────────
+async function generarFolioOT() {
+  const anio = new Date().getFullYear();
+  const snap = await firebase.firestore().collection('ordenes_trabajo')
+    .where('anio', '==', anio).get();
+  const siguiente = snap.size + 1;
+  return 'OT-' + String(siguiente).padStart(6, '0') + '-' + anio;
+}
+// AUTOTRANSPORTES ALANIS — Admin v2 (eventos)
+
+let todosEventos  = [];
+let todasOTs      = [];
+let totalOps      = 0;
+let toastTimer    = null;
+let adminNombre   = '';
+
+const CATALOGO = [
+  { id:'disponible',       label:'Disponible',          color:'#639922' },
+  { id:'taller',           label:'Taller',               color:'#BA7517' },
+  { id:'enfermo',          label:'Enfermo',              color:'#E24B4A' },
+  { id:'permiso',          label:'Permiso',              color:'#378ADD' },
+  { id:'vacaciones',       label:'Vacaciones',           color:'#9B59B6' },
+  { id:'incapacitado',     label:'Incapacitado',         color:'#888780' },
+  { id:'incidencia_viaje', label:'Incidencia en viaje',  color:'#E67E22' },
+  { id:'arribo_destino',   label:'Arribo a destino',     color:'#27AE60' },
+  { id:'fin_descarga',     label:'Fin de descarga',      color:'#16A085' },
+];
+
+firebase.auth().onAuthStateChanged(async user => {
+  if (!user) { window.location.href = 'index.html'; return; }
+  const doc = await firebase.firestore().collection('usuarios').doc(user.uid).get();
+  if (!doc.exists || !['admin','superadmin'].includes(doc.data().rol)) {
+    window.location.href = 'operador.html'; return;
+  }
+  if (doc.data().activo === false) { window.location.href = 'index.html'; return; }
+  adminNombre = doc.data().nombre || 'Administrador';
+  window.esSuperAdmin = doc.data().rol === 'superadmin';
+  const rolLabel = window.esSuperAdmin ? 'Superadmin' : 'Admin';
+  const headerEl = document.getElementById('header-usuario');
+  if (headerEl) headerEl.textContent = adminNombre + ' - ' + rolLabel;
+  if (window.esSuperAdmin) {
+    const btnAdmins = document.getElementById('nav-administradores');
+    if (btnAdmins) btnAdmins.style.display = '';
+  }
+  if (localStorage.getItem('darkMode') === '1') toggleDark();
+  setFechaAdmin();
+  cargarEventosHoy();
+  cargarOTs();
+  cargarTotalOperadores();
+  cargarSolicitudes();
+});
+
+function setFechaAdmin() {
+  document.getElementById('fecha-admin').textContent =
+    new Date().toLocaleDateString('es-MX', { weekday:'long', day:'numeric', month:'long' });
+}
+
+function getFechaLocal() {
+  const now = new Date();
+  return now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
+}
+
+function switchTab(tab) {
+  ['dashboard','ots','solicitudes','asignaciones','operadores','administradores','reportes'].forEach(function(t) {
+    const tabEl = document.getElementById('tab-' + t);
+    const navEl = document.getElementById('nav-' + t);
+    if (tabEl) tabEl.classList.add('hidden');
+    if (navEl) navEl.classList.remove('active');
+  });
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+  document.getElementById('nav-' + tab).classList.add('active');
+  if (tab === 'asignaciones') cargarAsignaciones();
+  if (tab === 'operadores') cargarOperadores();
+  if (tab === 'administradores') cargarAdministradores();
+  if (tab === 'reportes') initReportes();
+}
+
+function toggleDark() {
+  document.body.classList.toggle('dark-mode');
+  localStorage.setItem('darkMode', document.body.classList.contains('dark-mode') ? '1' : '0');
+}
+
+function doLogout() {
+  firebase.auth().signOut().then(function() { window.location.href = 'index.html'; });
+}
+
+async function cargarTotalOperadores() {
+  const snap = await firebase.firestore().collection('usuarios').where('rol', '==', 'operador').get();
+  totalOps = snap.size;
+  actualizarStats();
+}
+
+async function cargarEventosHoy() {
+  try {
+    const hoy = getFechaLocal();
+    const snap = await firebase.firestore().collection('eventos')
+      .where('fecha', '==', hoy)
+      .orderBy('timestamp', 'desc').get();
+    todosEventos = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    actualizarStats();
+    renderEventos('todos');
+  } catch(e) {
+    console.error('Error cargando eventos:', e);
+    document.getElementById('reportes-list').innerHTML =
+      '<p class="text-muted" style="text-align:center;padding:24px">Error al cargar. Puede requerir un indice (F12).</p>';
+  }
+}
+
+function ultimoPorOperador() {
+  const map = {};
+  todosEventos.forEach(function(e) {
+    if (!map[e.uid]) map[e.uid] = e;
+  });
+  return Object.values(map);
+}
+
+function actualizarStats() {
+  const ultimos = ultimoPorOperador();
+  const disponibles = ultimos.filter(function(e) { return e.estatus === 'disponible'; }).length;
+  const enViaje     = ultimos.filter(function(e) { return e.categoria === 'viaje'; }).length;
+  const sinReporte  = Math.max(0, totalOps - ultimos.length);
+  document.getElementById('cnt-disponible').textContent = disponibles;
+  document.getElementById('cnt-incidencia').textContent = enViaje;
+  document.getElementById('cnt-sinreporte').textContent = sinReporte;
+  document.getElementById('cnt-total').textContent      = totalOps || '—';
+}
+
+function filterReportes(tipo, btn) {
+  document.querySelectorAll('#tab-dashboard .tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  btn.classList.add('active');
+  renderEventos(tipo);
+}
+
+function renderEventos(tipo) {
+  let lista = todosEventos;
+  if (tipo === 'ultimos')  lista = ultimoPorOperador();
+  if (tipo === 'patio')    lista = todosEventos.filter(function(e) { return e.categoria === 'patio'; });
+  if (tipo === 'viaje')    lista = todosEventos.filter(function(e) { return e.categoria === 'viaje'; });
+
+  const el = document.getElementById('reportes-list');
+  if (lista.length === 0) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Sin eventos en esta categoria.</p>';
+    return;
+  }
+  el.innerHTML = lista.map(function(e) {
+    const est = CATALOGO.find(function(c) { return c.id === e.estatus; });
+    const color = est ? est.color : '#888';
+    const label = e.estatus_label || (est ? est.label : e.estatus);
+    const initials = (e.operador || 'OP').split(' ').map(function(n){ return n[0]; }).join('').substring(0,2).toUpperCase();
+
+    let detalle = '';
+    if (e.fallas && e.fallas.length) detalle += e.fallas.length + ' falla(s)';
+    if (e.control_medico)  detalle += (detalle?' · ':'') + 'Control: ' + e.control_medico;
+    if (e.autorizo)        detalle += (detalle?' · ':'') + 'Autorizo: ' + e.autorizo;
+    if (e.incidencia_desc) detalle += (detalle?' · ':'') + e.incidencia_desc;
+    if (e.observaciones)   detalle += (detalle?' · ':'') + e.observaciones;
+    if (e.viaje_id)        detalle += (detalle?' · ':'') + 'Viaje: ' + e.viaje_id;
+
+    const gpsLink = e.gps
+      ? '<a href="https://www.google.com/maps?q=' + e.gps.lat + ',' + e.gps.lng + '" target="_blank" style="font-size:11px;color:var(--brand-light)">Ver ubicacion</a>'
+      : '';
+
+    return '<div class="card">' +
+      '<div class="op-row" style="padding:0;border:none">' +
+      '<div class="op-avatar">' + initials + '</div>' +
+      '<div style="flex:1">' +
+      '<div class="op-name">' + (e.operador || '—') + '</div>' +
+      '<div class="op-sub">' + (e.numero || '') + ' · ' + e.hora + '</div>' +
+      (detalle ? '<div class="op-sub" style="margin-top:2px">' + detalle + '</div>' : '') +
+      gpsLink +
+      '</div>' +
+      '<span class="badge" style="background:' + color + '22;color:' + color + '">' + label + '</span>' +
+      '</div></div>';
+  }).join('');
+}
+
+async function cargarOTs() {
+  try {
+    // Fecha de hoy como default
+    const hoy = getFechaLocal();
+    const ayer = new Date(); ayer.setDate(ayer.getDate() - 1);
+    const fechaAyer = ayer.getFullYear() + '-' + String(ayer.getMonth()+1).padStart(2,'0') + '-' + String(ayer.getDate()).padStart(2,'0');
+    const iniEl = document.getElementById('ots-fecha-ini');
+    const finEl = document.getElementById('ots-fecha-fin');
+    if (iniEl && !iniEl.value) iniEl.value = fechaAyer;
+    if (finEl && !finEl.value) finEl.value = hoy;
+    const snap = await firebase.firestore().collection('ordenes_trabajo')
+      .orderBy('fecha', 'desc').orderBy('timestamp', 'desc').limit(200).get();
+    todasOTs = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    renderOTs(todasOTs.filter(function(o) { return o.fecha >= fechaAyer && o.fecha <= hoy; }));
+  } catch(e) { console.error('Error OTs:', e); }
+}
+async function filtrarOTsPorFecha() {
+  const ini = document.getElementById('ots-fecha-ini').value;
+  const fin = document.getElementById('ots-fecha-fin').value;
+  if (!ini || !fin) { showToast('Selecciona ambas fechas', true); return; }
+  try {
+    const snap = await firebase.firestore().collection('ordenes_trabajo')
+      .orderBy('fecha', 'desc').orderBy('timestamp', 'desc').limit(200).get();
+    todasOTs = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+  } catch(e) { console.error('Error recargando OTs:', e); }
+  const filtradas = todasOTs.filter(function(o) { return o.fecha >= ini && o.fecha <= fin; });
+  renderOTs(filtradas);
+}
+
+
+// ── BLOQUE FALLAS NUEVAS (custom) — solo superadmin ───────────
+function construirBloqueFallasNuevas(lista) {
+  if (!lista || lista.length === 0) return '';
+  // Set de nombres ya catalogados (normalizados) para comparacion
+  const catalogadas = {};
+  FALLAS.forEach(function(f) { catalogadas[normalizarAdmin(f.name)] = true; });
+  const mapa = {};  // nombre normalizado -> { name, count }
+  lista.forEach(function(o) {
+    (o.fallas || []).forEach(function(f) {
+      if (f.custom === true) {
+        const key = normalizarAdmin(f.name);
+        // Solo mostrar si NO existe ya en el catalogo
+        if (catalogadas[key]) return;
+        if (!mapa[key]) mapa[key] = { name: f.name, count: 0 };
+        mapa[key].count++;
+      }
+    });
+  });
+  const nuevas = Object.values(mapa);
+  if (nuevas.length === 0) return '';
+  nuevas.sort(function(a, b) { return b.count - a.count; });
+
+  // Guardar para la funcion de copiar
+  window._fallasNuevasLista = nuevas.map(function(f) { return f.name; });
+
+  const items = nuevas.map(function(f) {
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--border)">' +
+      '<span style="flex:1;font-size:13px;color:var(--text-primary)">' + f.name + '</span>' +
+      '<span style="font-size:11px;color:var(--text-muted)">' + f.count + 'x</span>' +
+      '</div>';
+  }).join('');
+
+  return '<div class="card" style="border:1px solid #378ADD;margin-bottom:16px">' +
+    '<div class="row-between" style="margin-bottom:8px">' +
+    '<span style="font-size:14px;font-weight:700;color:#378ADD">\uD83D\uDD27 Fallas nuevas por revisar (' + nuevas.length + ')</span>' +
+    '<button onclick="copiarFallasNuevas()" class="btn-secondary" style="padding:6px 12px;font-size:12px">Copiar lista</button>' +
+    '</div>' +
+    '<p style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Fallas capturadas manualmente en el periodo mostrado. Revisalas y agregalas al catalogo.</p>' +
+    items +
+    '</div>';
+}
+
+function copiarFallasNuevas() {
+  const lista = window._fallasNuevasLista || [];
+  if (lista.length === 0) { showToast('No hay fallas nuevas', true); return; }
+  const texto = lista.join('\n');
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(texto).then(function() {
+      showToast(lista.length + ' falla(s) copiada(s)');
+    }).catch(function() {
+      showToast('No se pudo copiar', true);
+    });
+  } else {
+    showToast('Copia manual: ' + texto, false);
+  }
+}
+
+function renderOTs(lista) {
+  const el = document.getElementById('ots-list');
+  const bloqueNuevas = window.esSuperAdmin ? construirBloqueFallasNuevas(lista) : '';
+  if (!lista || lista.length === 0) {
+    el.innerHTML = bloqueNuevas + '<p class="text-muted" style="text-align:center;padding:24px">Sin órdenes en este período.</p>';
+    return;
+  }
+  el.innerHTML = bloqueNuevas + lista.map(function(o) {
+    // Formato fecha DD/MM/AAAA HH:MM
+    let fechaFmt = '—';
+    if (o.fecha) {
+      const p = o.fecha.split('-');
+      fechaFmt = p[2] + '/' + p[1] + '/' + p[0] + (o.hora ? ' ' + o.hora : '');
+    }
+    const fallasHtml = (o.fallas || []).slice(0,5).map(function(f) {
+      return '<div style="font-size:12px;color:var(--text-secondary);padding:3px 0;border-bottom:0.5px solid var(--border)">• ' + f.name +
+        ' <span class="sev-badge sev-' + f.sev + '">' + (f.sev==='alta'?'Alta':f.sev==='media'?'Media':'Baja') + '</span></div>';
+    }).join('');
+    const masLabel = (o.fallas && o.fallas.length > 5) ? '<div style="font-size:11px;color:var(--text-muted);margin-top:4px">+' + (o.fallas.length-5) + ' mas...</div>' : '';
+    return '<div class="card">' +
+      '<div class="row-between">' +
+      '<span style="font-size:15px;font-weight:700;color:var(--brand-light)">' + o.folio + '</span>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text-muted);margin:4px 0 8px">' + (o.operador||'—') + ' — Unidad: ' + (o.unidad||'—') + ' — ' + fechaFmt + '</div>' +
+      '<div>' + fallasHtml + masLabel + '</div>' +
+      '<div class="row mt-8" style="gap:6px">' +
+      '<button onclick="editarOT(\'' + o.id + '\')" class="btn-secondary" style="padding:7px;font-size:12px;flex:1">✏️ Editar</button>' +
+      '<button onclick="generarOrdenTaller(\'' + o.id + '\')" class="btn-primary" style="padding:7px;font-size:12px;flex:1">🖨️ Imprimir</button>' +
+      '</div></div>';
+  }).join('');
+}
+      '</div></div>';
+
+
+let solicitudesListener = null;
+
+function cargarSolicitudes() {
+  // Si ya hay un listener activo, no crear otro
+  if (solicitudesListener) return;
+  solicitudesListener = firebase.firestore().collection('solicitudes')
+    .where('estado', '==', 'pendiente')
+    .orderBy('timestamp', 'desc')
+    .onSnapshot(function(snap) {
+      const badge = document.getElementById('sol-badge');
+      if (snap.size > 0) { badge.classList.remove('hidden'); badge.textContent = snap.size; }
+      else badge.classList.add('hidden');
+      renderSolicitudes(snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); }));
+    }, function(e) { console.error('Error solicitudes:', e); });
+}
+
+function renderSolicitudes(lista) {
+  const el = document.getElementById('solicitudes-list');
+  if (lista.length === 0) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">No hay solicitudes pendientes.</p>';
+    return;
+  }
+  el.innerHTML = lista.map(function(s) {
+    const fecha = s.timestamp && s.timestamp.toDate
+      ? s.timestamp.toDate().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'})
+      : '—';
+    const initials = (s.nombre||'OP').split(' ').map(function(n){ return n[0]; }).join('').substring(0,2).toUpperCase();
+    return '<div class="card" id="sol-' + s.id + '">' +
+      '<div class="op-row" style="padding:0;border:none;margin-bottom:12px">' +
+      '<div class="op-avatar">' + initials + '</div>' +
+      '<div>' +
+      '<div class="op-name">' + (s.nombre||'Sin nombre') + '</div>' +
+      '<div class="op-sub">' + (s.correo||'—') + '</div>' +
+      '<div class="op-sub">' + fecha + '</div>' +
+      '</div>' +
+      '<span class="badge" style="background:#FAEEDA;color:#633806">🟡 Pendiente</span>' +
+      '</div>' +
+      '<div class="form-group">' +
+      '<label>Numero economico (opcional)</label>' +
+      '<input type="text" id="num-' + s.id + '" placeholder="Ej: OP-1021" style="font-size:14px"/>' +
+      '</div>' +
+      '<div class="row" style="gap:8px">' +
+      '<button onclick="rechazarSolicitud(\'' + s.id + '\')" class="btn-secondary" style="padding:10px;font-size:13px;flex:1">Rechazar</button>' +
+      (window.esSuperAdmin
+        ? '<button onclick="aprobarSolicitud(\'' + s.id + '\',\'' + (s.correo||'') + '\',\'' + (s.nombre||'') + '\',\'operador\')" class="btn-primary" style="padding:10px;font-size:13px;flex:1">✅ Operador</button>' +
+          '<button onclick="aprobarSolicitud(\'' + s.id + '\',\'' + (s.correo||'') + '\',\'' + (s.nombre||'') + '\',\'admin\')" class="btn-primary" style="padding:10px;font-size:13px;flex:1;background:#378ADD">👤 Admin</button>'
+        : '<button onclick="aprobarSolicitud(\'' + s.id + '\',\'' + (s.correo||'') + '\',\'' + (s.nombre||'') + '\',\'operador\')" class="btn-primary" style="padding:10px;font-size:13px;flex:1">Aprobar acceso</button>'
+      ) +
+      '</div></div>';
+  }).join('');
+}
+
+async function aprobarSolicitud(uid, correo, nombre, rol) {
+  rol = rol || 'operador';
+  if (rol === 'admin' && !window.esSuperAdmin) {
+    showToast('Sin permisos para crear administradores', true);
+    return;
+  }
+  const numEl = document.getElementById('num-' + uid);
+  const numero = numEl ? numEl.value.trim() : '';
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).set({
+      nombre: nombre, correo: correo, numero: numero, rol: rol, activo: true,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    await firebase.firestore().collection('solicitudes').doc(uid).update({ estado:'aprobado' });
+    showToast(nombre + ' aprobado como ' + rol);
+    cargarSolicitudes();
+    cargarTotalOperadores();
+  } catch(e) { showToast('Error al aprobar', true); }
+}
+async function rechazarSolicitud(uid) {
+  try {
+    await firebase.firestore().collection('solicitudes').doc(uid).update({ estado: 'rechazado' });
+    showToast('Solicitud rechazada');
+    cargarSolicitudes();
+  } catch(e) { showToast('Error al rechazar', true); }
+}
+
+function exportarExcel() {
+  if (todosEventos.length === 0) { showToast('No hay eventos para exportar', true); return; }
+  const hoy = getFechaLocal();
+  const rows = [['Operador','Numero','Estatus','Fecha','Hora','GPS','Viaje','Detalle']];
+  todosEventos.forEach(function(e) {
+    const gps = e.gps ? e.gps.lat + ',' + e.gps.lng : '';
+    let detalle = e.incidencia_desc || e.observaciones || e.autorizo || e.control_medico || '';
+    rows.push([e.operador, e.numero, e.estatus_label || e.estatus, e.fecha, e.hora, gps, e.viaje_id || '', detalle]);
+  });
+  const csv = rows.map(function(r) { return r.map(function(c) { return '"' + (c||'') + '"'; }).join(','); }).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = 'eventos-alanis-' + hoy + '.csv';
+  a.click(); URL.revokeObjectURL(url);
+  showToast('Exportacion descargada');
+}
+
+
+// ── ASIGNACIONES ──────────────────────────────────────────────
+let asignacionParseada = null;
+
+function procesarAsignacion() {
+  const raw = document.getElementById('asignacion-input').value;
+  if (!raw.trim()) { showToast('Pega una asignación primero', true); return; }
+
+  // Separar por saltos de línea y tomar la línea con datos (la que tiene tabulaciones y contenido)
+  const lineas = raw.split('\n').filter(function(l) { return l.indexOf('\t') !== -1; });
+  // Tomar la última línea con tabs (la de datos, no el encabezado)
+  let lineaDatos = null;
+  for (let i = lineas.length - 1; i >= 0; i--) {
+    if (lineas[i].indexOf('Instruccion') === -1) { lineaDatos = lineas[i]; break; }
+  }
+  if (!lineaDatos) { showToast('No se encontró una fila de datos válida', true); return; }
+
+  const cols = lineaDatos.split('\t');
+
+  // Mapeo de columnas (índice base 0)
+  const destino   = (cols[5]  || '').trim();
+  const linea     = (cols[9]  || '').trim();
+  const remolque  = (cols[10] || '').trim();
+  const cliente   = (cols[14] || '').trim();
+  const fechaCita = (cols[15] || '').trim();
+  const horaCita  = (cols[16] || '').trim();
+  const unidad    = (cols[19] || '').trim();
+  const operador  = (cols[20] || '').trim();
+
+  asignacionParseada = {
+    destino: destino,
+    linea: linea,
+    remolque: remolque,
+    cliente: cliente,
+    cita: (fechaCita + ' ' + horaCita).trim(),
+    unidad: unidad,
+    operador_erp: operador,
+  };
+
+  // Mostrar preview
+  const preview = document.getElementById('asignacion-preview');
+  preview.innerHTML = '<div class="card" style="margin-top:12px">' +
+    '<p class="section-label" style="margin-top:0">Datos extraídos</p>' +
+    '<div style="font-size:13px;line-height:1.9">' +
+    '<div><strong>Unidad:</strong> ' + (unidad || '—') + '</div>' +
+    '<div><strong>Operador (ADREMATASA):</strong> ' + (operador || '—') + '</div>' +
+    '<div><strong>Remolque:</strong> ' + (remolque || '—') + '</div>' +
+    '<div><strong>Línea:</strong> ' + (linea || '—') + '</div>' +
+    '<div><strong>Cliente:</strong> ' + (cliente || '—') + '</div>' +
+    '<div><strong>Destino:</strong> ' + (destino || '—') + '</div>' +
+    '<div><strong>Cita:</strong> ' + (asignacionParseada.cita || '—') + '</div>' +
+    '</div>' +
+    '<button class="btn-primary mt-12" onclick="guardarAsignacion()">Asignar a operador de unidad ' + (unidad||'?') + '</button>' +
+    '</div>';
+}
+
+async function guardarAsignacion() {
+  if (!asignacionParseada) return;
+  if (!asignacionParseada.unidad) { showToast('La asignación no tiene unidad', true); return; }
+
+  // Buscar operador con esa unidad
+  try {
+    const snap = await firebase.firestore().collection('usuarios')
+      .where('rol', '==', 'operador')
+      .where('numero', '==', asignacionParseada.unidad)
+      .where('activo', '==', true)
+      .limit(1).get();
+
+    if (snap.empty) {
+      showToast('No hay operador activo con unidad ' + asignacionParseada.unidad, true);
+      return;
+    }
+
+    const opDoc = snap.docs[0];
+    const opData = opDoc.data();
+
+    await firebase.firestore().collection('asignaciones').add({
+      uid_operador: opDoc.id,
+      operador_nombre: opData.nombre,
+      unidad: asignacionParseada.unidad,
+      operador_erp: asignacionParseada.operador_erp,
+      remolque: asignacionParseada.remolque,
+      linea: asignacionParseada.linea,
+      cliente: asignacionParseada.cliente,
+      destino: asignacionParseada.destino,
+      cita: asignacionParseada.cita,
+      estado: 'pendiente',
+      fecha_creacion: getFechaLocal(),
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+
+    showToast('Asignación creada para ' + opData.nombre);
+
+    // Construir y abrir WhatsApp si el operador tiene teléfono
+    if (opData.telefono) {
+      const lada = opData.lada || '52';
+      const numeroWA = lada + opData.telefono;
+      const mensaje =
+        '*AUTOTRANSPORTES ALANIS*\n' +
+        'Nueva asignacion de viaje:\n\n' +
+        'Cliente: ' + asignacionParseada.cliente + '\n' +
+        'Destino: ' + (asignacionParseada.destino || '-') + '\n' +
+        'Remolque: ' + asignacionParseada.remolque + '\n' +
+        'Linea: ' + asignacionParseada.linea + '\n' +
+        'Cita: ' + (asignacionParseada.cita || '-') + '\n\n' +
+        'Ingresa a la app para aceptar tu viaje.';
+      const url = 'https://wa.me/' + numeroWA + '?text=' + encodeURIComponent(mensaje);
+      window.open(url, '_blank');
+    } else {
+      showToast('Operador sin teléfono — no se envió WhatsApp', true);
+    }
+
+    document.getElementById('asignacion-input').value = '';
+    document.getElementById('asignacion-preview').innerHTML = '';
+    asignacionParseada = null;
+    cargarAsignaciones();
+  } catch(e) {
+    console.error(e);
+    showToast('Error al guardar la asignación', true);
+  }
+}
+
+async function cargarAsignaciones() {
+  try {
+    const snap = await firebase.firestore().collection('asignaciones')
+      .orderBy('timestamp', 'desc').limit(50).get();
+    const lista = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    const pendientes = lista.filter(function(a) { return a.estado === 'pendiente'; }).length;
+    const badge = document.getElementById('asig-badge');
+    if (pendientes > 0) { badge.classList.remove('hidden'); badge.textContent = pendientes; }
+    else badge.classList.add('hidden');
+    renderAsignaciones(lista);
+  } catch(e) { console.error('Error asignaciones:', e); }
+}
+
+function renderAsignaciones(lista) {
+  const el = document.getElementById('asignaciones-list');
+  if (lista.length === 0) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Sin asignaciones.</p>';
+    return;
+  }
+  const ESTADO = { pendiente:'🟡 Pendiente', aceptada:'🟢 Aceptada', rechazada:'🔴 Rechazada' };
+  el.innerHTML = lista.map(function(a) {
+    return '<div class="card">' +
+      '<div class="row-between">' +
+      '<span style="font-size:15px;font-weight:700;color:var(--brand-light)">Unidad ' + a.unidad + '</span>' +
+      '<span style="font-size:12px">' + (ESTADO[a.estado] || a.estado) + '</span>' +
+      '</div>' +
+      '<div style="font-size:13px;color:var(--text-secondary);margin-top:6px;line-height:1.7">' +
+      '<div>Operador: ' + a.operador_nombre + '</div>' +
+      '<div>Cliente: ' + a.cliente + ' — Destino: ' + (a.destino || '—') + '</div>' +
+      '<div>Remolque: ' + a.remolque + ' — Línea: ' + a.linea + '</div>' +
+      '<div>Cita: ' + (a.cita || '—') + '</div>' +
+      (a.motivo_rechazo ? '<div style="color:var(--red)">Motivo rechazo: ' + a.motivo_rechazo + '</div>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+
+// ── GESTION DE OPERADORES ─────────────────────────────────────
+async function cargarOperadores() {
+  try {
+    const snap = await firebase.firestore().collection('usuarios')
+      .where('rol', '==', 'operador').get();
+    const lista = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    lista.sort(function(a, b) { return (a.nombre || '').localeCompare(b.nombre || ''); });
+    renderOperadores(lista);
+  } catch(e) { console.error('Error operadores:', e); }
+}
+
+function renderOperadores(lista) {
+  const el = document.getElementById('operadores-list');
+  if (lista.length === 0) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Sin operadores registrados.</p>';
+    return;
+  }
+  el.innerHTML = lista.map(function(o) {
+    const initials = (o.nombre||'OP').split(' ').map(function(n){ return n[0]; }).join('').substring(0,2).toUpperCase();
+    const activoBadge = o.activo
+      ? '<span class="badge" style="background:#E8F5E9;color:#2E7D32">Activo</span>'
+      : '<span class="badge" style="background:#FFEBEE;color:#C62828">Inactivo</span>';
+    return '<div class="card">' +
+      '<div class="op-row" style="padding:0;border:none;margin-bottom:12px">' +
+      '<div class="op-avatar">' + initials + '</div>' +
+      '<div style="flex:1">' +
+      '<div class="op-name">' + (o.nombre || '—') + '</div>' +
+      '<div class="op-sub">' + (o.correo || '—') + '</div>' +
+      '</div>' +
+      activoBadge +
+      '</div>' +
+      '<div class="form-group" style="margin-bottom:8px">' +
+      '<label>Unidad asignada</label>' +
+      '<input type="text" id="unidad-' + o.id + '" value="' + (o.numero || '') + '" placeholder="Ej: 1121" style="font-size:14px"/>' +
+      '</div>' +
+      '<div class="form-group" style="margin-bottom:8px">' +
+      '<label>Teléfono móvil (WhatsApp)</label>' +
+      '<div style="display:flex;gap:6px">' +
+      '<select id="lada-' + o.id + '" style="width:90px;font-size:14px;padding:8px;border:0.5px solid var(--border-strong);border-radius:8px;background:var(--bg-app);color:var(--text-primary)">' +
+      '<option value="52"' + ((o.lada||'52')==='52'?' selected':'') + '>🇲🇽 +52</option>' +
+      '<option value="1"' + ((o.lada||'')==='1'?' selected':'') + '>🇺🇸 +1</option>' +
+      '</select>' +
+      '<input type="tel" id="tel-' + o.id + '" value="' + (o.telefono || '') + '" placeholder="10 dígitos" maxlength="10" style="flex:1;font-size:14px"/>' +
+      '</div>' +
+      '</div>' +
+      '<button class="btn-secondary" style="padding:9px;font-size:13px;width:100%;margin-bottom:8px" onclick="guardarTelefono(\'' + o.id + '\')">Guardar teléfono</button>' +
+      '<div class="row" style="gap:8px">' +
+      '<button class="btn-secondary" style="padding:9px;font-size:13px;flex:1" onclick="toggleActivoOperador(\'' + o.id + '\',' + (!o.activo) + ')">' + (o.activo ? 'Desactivar' : 'Activar') + '</button>' +
+      '<button class="btn-primary" style="padding:9px;font-size:13px;flex:1" onclick="guardarUnidad(\'' + o.id + '\',\'' + (o.numero||'') + '\')">Guardar unidad</button>' +
+      '</div>' +
+      '<div style="text-align:center;margin-top:8px"><a onclick="verHistorialUnidad(\'' + o.id + '\')" style="font-size:12px;color:var(--brand-light);cursor:pointer">Ver histórico de unidades</a></div>' +
+      '<div id="hist-' + o.id + '" style="margin-top:8px"></div>' +
+      (window.esSuperAdmin ? '<div style="margin-top:8px"><button class="btn-secondary" style="padding:9px;font-size:12px;width:100%;border-color:#378ADD;color:#378ADD" onclick="promoverAAdmin(\'' + o.id + '\')">👤 Promover a Administrador</button></div>' : '') +
+      '</div>';
+  }).join('');
+}
+
+async function guardarUnidad(uid, unidadAnterior) {
+  const input = document.getElementById('unidad-' + uid);
+  const nuevaUnidad = input ? input.value.trim() : '';
+  if (!nuevaUnidad) { showToast('Ingresa un número de unidad', true); return; }
+  if (nuevaUnidad === unidadAnterior) { showToast('La unidad no cambió', true); return; }
+
+  try {
+    // Actualizar unidad actual
+    await firebase.firestore().collection('usuarios').doc(uid).update({ numero: nuevaUnidad });
+    // Registrar en histórico
+    const ahora = new Date();
+    const horaLocal = String(ahora.getHours()).padStart(2,'0') + ':' + String(ahora.getMinutes()).padStart(2,'0');
+    await firebase.firestore().collection('usuarios').doc(uid).collection('historial_unidades').add({
+      unidad_anterior: unidadAnterior || '(ninguna)',
+      unidad_nueva: nuevaUnidad,
+      fecha: getFechaLocal(),
+      hora: horaLocal,
+      timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    showToast('Unidad actualizada a ' + nuevaUnidad);
+    cargarOperadores();
+  } catch(e) {
+    console.error(e);
+    showToast('Error al guardar la unidad', true);
+  }
+}
+
+async function toggleActivoOperador(uid, nuevoEstado) {
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).update({ activo: nuevoEstado });
+    showToast(nuevoEstado ? 'Operador activado' : 'Operador desactivado');
+    cargarOperadores();
+  } catch(e) { showToast('Error al actualizar', true); }
+}
+
+async function verHistorialUnidad(uid) {
+  const cont = document.getElementById('hist-' + uid);
+  if (cont.innerHTML !== '') { cont.innerHTML = ''; return; }
+  try {
+    const snap = await firebase.firestore().collection('usuarios').doc(uid)
+      .collection('historial_unidades').orderBy('timestamp', 'desc').limit(10).get();
+    if (snap.empty) { cont.innerHTML = '<p class="text-muted" style="font-size:12px">Sin cambios registrados.</p>'; return; }
+    cont.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);border-top:0.5px solid var(--border);padding-top:8px">' +
+      snap.docs.map(function(d) {
+        const h = d.data();
+        return '<div>' + h.fecha + ' ' + (h.hora || '') + ': ' + h.unidad_anterior + ' → ' + h.unidad_nueva + '</div>';
+      }).join('') + '</div>';
+  } catch(e) { console.error(e); }
+}
+
+function showToast(msg, warn) {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-msg').textContent = msg;
+  t.className = 'toast' + (warn ? ' toast-warn' : '');
+  void t.offsetWidth;
+  t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function() { t.classList.remove('show'); }, 3500);
+}
+
+// ── ORDEN DE TALLER (IMPRIMIBLE) ──────────────────────────────
+function generarOrdenTaller(otId) {
+  const ot = todasOTs.find(function(o) { return o.id === otId; });
+  if (!ot) { showToast('No se encontro la OT', true); return; }
+
+  const SEV_COLOR = { alta:'#E24B4A', media:'#BA7517', baja:'#639922' };
+  const SEV_LABEL = { alta:'ALTA', media:'MEDIA', baja:'BAJA' };
+
+  const ahora = new Date();
+  const fechaImpresion = ahora.toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' }) +
+    ' ' + String(ahora.getHours()).padStart(2,'0') + ':' + String(ahora.getMinutes()).padStart(2,'0');
+
+  const fallas = ot.fallas || [];
+  let filasHtml = '';
+  const totalFilas = Math.max(fallas.length, 12);
+  for (let i = 0; i < totalFilas; i++) {
+    const f = fallas[i];
+    if (f) {
+      const color = SEV_COLOR[f.sev] || '#888';
+      const lbl = SEV_LABEL[f.sev] || '';
+      filasHtml += '<tr>' +
+        '<td class="num">' + (i+1) + '</td>' +
+        '<td class="falla">' + f.name + '</td>' +
+        '<td class="sev"><span class="sev-badge" style="background:' + color + '">' + lbl + '</span></td>' +
+        '<td class="realizo"></td>' +
+        '</tr>';
+    } else {
+      filasHtml += '<tr><td class="num">' + (i+1) + '</td><td></td><td></td><td class="realizo"></td></tr>';
+    }
+  }
+
+  const logoUrl = window.location.origin + '/img/logo-reporte.png';
+
+  const html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Orden de Taller ' + ot.folio + '</title>' +
+    '<style>' +
+    '* { margin:0; padding:0; box-sizing:border-box; }' +
+    'body { font-family:Arial, sans-serif; color:#1a1a1a; padding:32px 40px; }' +
+    '.no-print { text-align:center; margin-bottom:20px; }' +
+    '.btn-print { background:#2C1E0F; color:#fff; border:none; padding:12px 24px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }' +
+    '.header { display:flex; align-items:center; justify-content:space-between; border-bottom:3px solid #2C1E0F; padding-bottom:16px; margin-bottom:20px; }' +
+    '.header img { height:64px; }' +
+    '.header .titulo { text-align:right; }' +
+    '.header .titulo h2 { font-size:16px; color:#2C1E0F; }' +
+    '.header .titulo h1 { font-size:22px; color:#2C1E0F; letter-spacing:1px; }' +
+    '.datos { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px 24px; margin-bottom:20px; font-size:14px; }' +
+    '.datos .campo { padding:6px 0; border-bottom:1px solid #ddd; }' +
+    '.datos .campo strong { color:#2C1E0F; display:inline-block; min-width:90px; }' +
+    'table { width:100%; border-collapse:collapse; margin-bottom:32px; }' +
+    'th { background:#2C1E0F; color:#fff; font-size:12px; padding:8px; text-align:left; text-transform:uppercase; letter-spacing:0.5px; }' +
+    'td { border:1px solid #ccc; padding:8px 10px; font-size:13px; height:34px; }' +
+    'td.num { width:36px; text-align:center; font-weight:700; background:#f5f5f5; }' +
+    'td.sev { width:90px; text-align:center; }' +
+    'td.realizo { width:180px; }' +
+    'th.realizo-th { width:180px; }' +
+    '.sev-badge { color:#fff; font-size:10px; font-weight:700; padding:3px 8px; border-radius:4px; }' +
+    '.firmas { display:flex; justify-content:space-around; gap:60px; margin-top:48px; }' +
+    '.firma { text-align:center; flex:1; }' +
+    '.firma .linea { border-top:1.5px solid #1a1a1a; margin-bottom:6px; }' +
+    '.firma .rol { font-size:13px; font-weight:700; }' +
+    '.firma .nombre { font-size:13px; margin-bottom:4px; min-height:18px; }' +
+    '.pie { margin-top:32px; font-size:10px; color:#888; text-align:center; }' +
+    '@media print { .no-print { display:none; } body { padding:0; } }' +
+    '</style></head><body>' +
+    '<div class="no-print"><button class="btn-print" onclick="window.print()">Imprimir / Guardar PDF</button></div>' +
+    '<div class="header">' +
+    '<img src="' + logoUrl + '" alt="Alanis"/>' +
+    '<div class="titulo"><h1>ORDEN DE TALLER</h1></div>' +
+    '</div>' +
+    '<div class="datos">' +
+    '<div class="campo"><strong>Folio:</strong> ' + ot.folio + '</div>' +
+    '<div class="campo"><strong>Unidad:</strong> ' + (ot.unidad || '-') + '</div>' +
+    '<div class="campo"><strong>Operador:</strong> ' + (ot.operador || '-') + '</div>' +
+    '<div class="campo"><strong>Fecha reporte:</strong> ' + (ot.fecha || '-') + ' ' + (ot.hora || '') + '</div>' +
+    '<div class="campo"><strong>Impresion:</strong> ' + fechaImpresion + '</div>' +
+    '<div class="campo"><strong>Estado:</strong> ' + (ot.estado || '-') + '</div>' +
+    '</div>' +
+    '<table><thead><tr><th>#</th><th>Falla reportada</th><th>Gravedad</th><th class="realizo-th">Realizo (mecanico)</th></tr></thead>' +
+    '<tbody>' + filasHtml + '</tbody></table>' +
+    '<div class="firmas">' +
+    '<div class="firma"><div class="nombre">' + (ot.operador || '') + '</div><div class="linea"></div><div class="rol">FIRMA OPERADOR</div></div>' +
+    '<div class="firma"><div class="nombre">' + adminNombre + '</div><div class="linea"></div><div class="rol">COORDINADOR</div></div>' +
+    '</div>' +
+    '<div class="pie">Autotransportes Alanis - Documento generado el ' + fechaImpresion + '</div>' +
+    '</body></html>';
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+}
+
+// ── GUARDAR TELEFONO DE OPERADOR ──────────────────────────────
+async function guardarTelefono(uid) {
+  const ladaEl = document.getElementById('lada-' + uid);
+  const telEl  = document.getElementById('tel-' + uid);
+  const lada = ladaEl ? ladaEl.value : '52';
+  const tel  = telEl ? telEl.value.trim().replace(/\D/g, '') : '';
+
+  if (tel.length !== 10) {
+    showToast('El teléfono debe tener 10 dígitos', true);
+    return;
+  }
+
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).update({
+      lada: lada,
+      telefono: tel,
+    });
+    showToast('Teléfono guardado: +' + lada + ' ' + tel);
+  } catch(e) {
+    console.error(e);
+    showToast('Error al guardar el teléfono', true);
+  }
+}
+
+// ── GESTIÓN DE ADMINISTRADORES (solo superadmin) ──────────────
+async function cargarAdministradores() {
+  if (!window.esSuperAdmin) return;
+  const el = document.getElementById('admins-list');
+  el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Cargando...</p>';
+  try {
+    const snap = await firebase.firestore().collection('usuarios')
+      .where('rol', 'in', ['admin', 'superadmin']).get();
+    const admins = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    if (admins.length === 0) {
+      el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Sin administradores registrados.</p>';
+      return;
+    }
+    el.innerHTML = admins.map(function(a) {
+      const esSA = a.rol === 'superadmin';
+      const activo = a.activo !== false;
+      return '<div class="card" style="opacity:' + (activo ? '1' : '0.5') + '">' +
+        '<div class="op-row" style="padding:0;border:none">' +
+        '<div class="op-avatar" style="background:' + (esSA ? '#2C1E0F' : '#378ADD') + '">' +
+          (a.nombre || 'A').substring(0,2).toUpperCase() +
+        '</div>' +
+        '<div style="flex:1">' +
+          '<div class="op-name">' + (a.nombre || '—') + '</div>' +
+          '<div class="op-sub">' + (a.email || '') + '</div>' +
+          '<div class="op-sub" style="margin-top:2px">' +
+            '<span style="background:' + (esSA ? '#2C1E0F' : '#378ADD') + ';color:#fff;padding:2px 8px;border-radius:4px;font-size:11px">' +
+              (esSA ? 'SUPERADMIN' : 'ADMIN') +
+            '</span>' +
+            (activo ? '' : ' <span style="background:#E24B4A;color:#fff;padding:2px 8px;border-radius:4px;font-size:11px">DESACTIVADO</span>') +
+          '</div>' +
+        '</div>' +
+        (!esSA ? '<div style="display:flex;gap:8px">' +
+          (activo
+            ? '<button onclick="desactivarAdmin(\'' + a.id + '\')" class="btn-secondary" style="font-size:12px;padding:7px">Desactivar</button>'
+            : '<button onclick="reactivarAdmin(\'' + a.id + '\')" class="btn-primary" style="font-size:12px;padding:7px">Reactivar</button>'
+          ) +
+        '</div>' : '') +
+        '</div></div>';
+    }).join('');
+  } catch(e) {
+    console.error(e);
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Error al cargar administradores.</p>';
+  }
+}
+
+async function desactivarAdmin(uid) {
+  if (!window.esSuperAdmin) return;
+  if (!confirm('¿Desactivar este administrador?')) return;
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).update({ activo: false });
+    showToast('Administrador desactivado');
+    cargarAdministradores();
+  } catch(e) {
+    showToast('Error al desactivar', true);
+  }
+}
+
+async function reactivarAdmin(uid) {
+  if (!window.esSuperAdmin) return;
+  if (!confirm('¿Reactivar este administrador?')) return;
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).update({ activo: true });
+    showToast('Administrador reactivado');
+    cargarAdministradores();
+  } catch(e) {
+    showToast('Error al reactivar', true);
+  }
+}
+
+async function promoverAAdmin(uid) {
+  if (!window.esSuperAdmin) return;
+  if (!confirm('¿Promover este operador a administrador?')) return;
+  try {
+    await firebase.firestore().collection('usuarios').doc(uid).update({ rol: 'admin', activo: true });
+    showToast('Operador promovido a admin');
+    cargarOperadores();
+  } catch(e) {
+    showToast('Error al promover', true);
+  }
+}
+
+// ── EDITAR OT ──────────────────────────────────────────────────
+// ── NORMALIZAR (ignora acentos) ───────────────────────────────
+function normalizarAdmin(str) {
+  return (str || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+// ── ABRIR MODAL OT (crear o editar) ───────────────────────────
+async function editarOT(otId) {
+  let ot = { operador:'', unidad:'', fallas:[] };
+  if (otId) {
+    const doc = await firebase.firestore().collection('ordenes_trabajo').doc(otId).get();
+    if (!doc.exists) { showToast('OT no encontrada', true); return; }
+    ot = Object.assign({ id: doc.id }, doc.data());
+  }
+  window._otFallas = (ot.fallas || []).slice();
+  window._otEditId = otId || null;
+
+  const modal = document.createElement('div');
+  modal.id = 'modal-ot';
+  modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box';
+
+  const titulo = otId ? 'Editar orden de trabajo' : 'Nueva orden de trabajo';
+
+  modal.innerHTML = '<div style="background:var(--bg-card);border-radius:16px;width:100%;max-width:480px;max-height:88vh;overflow-y:auto;padding:20px;box-sizing:border-box">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">' +
+    '<span style="font-size:16px;font-weight:700;color:var(--brand-light)">' + titulo + '</span>' +
+    '<button onclick="document.getElementById(\'modal-ot\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-secondary)">\u2715</button>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Operador</label>' +
+    '<input type="text" id="ot-operador" value="' + (ot.operador || '') + '" placeholder="Nombre del operador" style="font-size:14px"/>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Unidad</label>' +
+    '<input type="text" id="ot-unidad" value="' + (ot.unidad || '') + '" placeholder="Ej: 1121" style="font-size:14px"/>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Fallas seleccionadas</label>' +
+    '<div id="ot-fallas-sel"></div>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Agregar falla del catalogo</label>' +
+    '<input type="text" id="ot-buscar-falla" placeholder="Buscar falla..." oninput="renderCatalogoOT()" style="font-size:14px"/>' +
+    '<div id="ot-catalogo" style="max-height:180px;overflow-y:auto;margin-top:6px"></div>' +
+    '</div>' +
+    '<div class="form-group">' +
+    '<label>Falla no listada (separa varias con coma)</label>' +
+    '<input type="text" id="ot-falla-libre" placeholder="Ej: Sensor de temperatura" style="font-size:14px;width:100%;box-sizing:border-box;margin-bottom:6px"/>' +
+    '<button onclick="agregarFallaLibre()" class="btn-secondary" style="padding:9px;font-size:13px;width:100%">+ Agregar falla</button>' +
+    '</div>' +
+    '<button onclick="guardarOT()" class="btn-primary" style="width:100%;padding:12px;margin-top:8px">' + (otId ? 'Guardar cambios' : 'Crear orden') + '</button>' +
+    '</div>';
+
+  document.body.appendChild(modal);
+  renderFallasSeleccionadasOT();
+  renderCatalogoOT();
+}
+
+// ── Render de fallas ya seleccionadas (con boton quitar) ──────
+function renderFallasSeleccionadasOT() {
+  const el = document.getElementById('ot-fallas-sel');
+  if (!el) return;
+  if (window._otFallas.length === 0) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text-muted);padding:6px 0">Sin fallas. Agrega desde el catalogo.</p>';
+    return;
+  }
+  el.innerHTML = window._otFallas.map(function(f, i) {
+    return '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:0.5px solid var(--border)">' +
+      '<span style="flex:1;font-size:13px">' + f.name + '</span>' +
+      '<span class="sev-badge sev-' + f.sev + '" style="font-size:10px;padding:2px 6px;border-radius:4px;color:#fff">' + f.sev + '</span>' +
+      '<button onclick="quitarFallaOT(' + i + ')" style="background:none;border:none;color:#E24B4A;font-size:16px;cursor:pointer;padding:0 4px">\u2715</button>' +
+      '</div>';
+  }).join('');
+}
+
+// ── Render del catalogo filtrado (para agregar) ──────────────
+function renderCatalogoOT() {
+  const el = document.getElementById('ot-catalogo');
+  if (!el) return;
+  const q = normalizarAdmin(document.getElementById('ot-buscar-falla').value);
+  const yaIds = window._otFallas.map(function(f) { return f.id; });
+  const filtered = FALLAS.filter(function(f) {
+    if (yaIds.indexOf(f.id) !== -1) return false;
+    return normalizarAdmin(f.name).includes(q) || normalizarAdmin(f.cat).includes(q);
+  });
+  if (filtered.length === 0) {
+    el.innerHTML = '<p style="font-size:12px;color:var(--text-muted);padding:6px 0">Sin coincidencias.</p>';
+    return;
+  }
+  el.innerHTML = filtered.map(function(f) {
+    return '<div onclick="agregarFallaOT(' + f.id + ')" style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--border);cursor:pointer">' +
+      '<span style="color:var(--brand-light);font-size:16px">+</span>' +
+      '<div style="flex:1"><div style="font-size:10px;color:var(--text-muted)">' + f.cat + '</div><div style="font-size:13px">' + f.name + '</div></div>' +
+      '<span class="sev-badge sev-' + f.sev + '" style="font-size:10px;padding:2px 6px;border-radius:4px;color:#fff">' + f.sev + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function agregarFallaOT(id) {
+  const f = FALLAS.find(function(x) { return x.id === id; });
+  if (f && window._otFallas.map(function(x){return x.id;}).indexOf(id) === -1) {
+    window._otFallas.push(f);
+  }
+  renderFallasSeleccionadasOT();
+  renderCatalogoOT();
+}
+
+// ── AGREGAR FALLA LIBRE (no catalogada) ───────────────────────
+function agregarFallaLibre() {
+  const inp = document.getElementById('ot-falla-libre');
+  if (!inp) return;
+  const texto = inp.value.trim();
+  if (!texto) { showToast('Escribe al menos una falla', true); return; }
+  // Separar por coma, limpiar espacios y vacios
+  const nuevas = texto.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  let agregadas = 0;
+  nuevas.forEach(function(nombre) {
+    // Capitalizar primera letra
+    const limpio = nombre.charAt(0).toUpperCase() + nombre.slice(1);
+    // Evitar duplicados por nombre (ignora acentos/mayusculas)
+    const yaExiste = window._otFallas.some(function(f) {
+      return normalizarAdmin(f.name) === normalizarAdmin(limpio);
+    });
+    if (!yaExiste) {
+      // id negativo unico para no chocar con catalogo; custom=true; sev media
+      const idCustom = -(Date.now() + agregadas);
+      window._otFallas.push({ id: idCustom, cat: 'Sin clasificar', name: limpio, sev: 'media', custom: true });
+      agregadas++;
+    }
+  });
+  inp.value = '';
+  renderFallasSeleccionadasOT();
+  renderCatalogoOT();
+  if (agregadas > 0) showToast(agregadas + ' falla(s) agregada(s)');
+  else showToast('Esa falla ya estaba en la lista', true);
+}
+
+function quitarFallaOT(i) {
+  window._otFallas.splice(i, 1);
+  renderFallasSeleccionadasOT();
+  renderCatalogoOT();
+}
+
+// ── Guardar (crea o actualiza) ───────────────────────────────
+async function guardarOT() {
+  const operador = document.getElementById('ot-operador').value.trim();
+  const unidad   = document.getElementById('ot-unidad').value.trim();
+  const fallas   = window._otFallas;
+  if (!operador) { showToast('El operador no puede estar vacio', true); return; }
+  if (fallas.length === 0) { showToast('Debe haber al menos una falla', true); return; }
+  try {
+    if (window._otEditId) {
+      await firebase.firestore().collection('ordenes_trabajo').doc(window._otEditId).update({
+        operador: operador, unidad: unidad, numero: unidad, fallas: fallas,
+      });
+      showToast('OT actualizada correctamente');
+    } else {
+      const anio = new Date().getFullYear();
+      const folio = 'OT-' + String(Math.floor(Math.random() * 900000) + 100000) + '-' + anio;
+      const ahora = new Date();
+      const fecha = ahora.getFullYear() + '-' + String(ahora.getMonth()+1).padStart(2,'0') + '-' + String(ahora.getDate()).padStart(2,'0');
+      const hora = String(ahora.getHours()).padStart(2,'0') + ':' + String(ahora.getMinutes()).padStart(2,'0');
+      await firebase.firestore().collection('ordenes_trabajo').add({
+        folio: folio, anio: anio, uid: (firebase.auth().currentUser ? firebase.auth().currentUser.uid : ''),
+        operador: operador, numero: unidad, unidad: unidad, fallas: fallas,
+        fecha: fecha, hora: hora,
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      showToast('OT creada: ' + folio);
+    }
+    document.getElementById('modal-ot').remove();
+    filtrarOTsPorFecha();
+  } catch(e) {
+    console.error(e);
+    showToast('Error al guardar', true);
+  }
+}
+
+// ── REPORTEADOR DE OTs ────────────────────────────────────────
+function initReportes() {
+  const hoy = getFechaLocal();
+  const ini = new Date(); ini.setDate(ini.getDate() - 7);
+  const fechaIni = ini.getFullYear() + '-' + String(ini.getMonth()+1).padStart(2,'0') + '-' + String(ini.getDate()).padStart(2,'0');
+  const iniEl = document.getElementById('rep-fecha-ini');
+  const finEl = document.getElementById('rep-fecha-fin');
+  if (iniEl && !iniEl.value) iniEl.value = fechaIni;
+  if (finEl && !finEl.value) finEl.value = hoy;
+}
+
+async function generarReporte() {
+  const ini = document.getElementById('rep-fecha-ini').value;
+  const fin = document.getElementById('rep-fecha-fin').value;
+  const unidadFiltro = document.getElementById('rep-unidad').value.trim();
+  if (!ini || !fin) { showToast('Selecciona ambas fechas', true); return; }
+
+  const cont = document.getElementById('reporte-resultado');
+  cont.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Generando...</p>';
+
+  try {
+    const snap = await firebase.firestore().collection('ordenes_trabajo')
+      .orderBy('fecha', 'desc').orderBy('timestamp', 'desc').limit(500).get();
+    let ots = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+    // Filtrar por rango de fechas
+    ots = ots.filter(function(o) { return o.fecha >= ini && o.fecha <= fin; });
+    // Filtrar por unidad si se especifico
+    if (unidadFiltro) {
+      ots = ots.filter(function(o) { return String(o.unidad || '') === unidadFiltro; });
+    }
+
+    if (ots.length === 0) {
+      cont.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Sin órdenes en ese período' + (unidadFiltro ? ' para la unidad ' + unidadFiltro : '') + '.</p>';
+      return;
+    }
+
+    // Calcular metricas
+    let totalFallas = 0;
+    const porCategoria = {};
+    const porSeveridad = { alta:0, media:0, baja:0 };
+    const frecuencia = {};  // name -> { count, fechas: [] }
+
+    ots.forEach(function(o) {
+      (o.fallas || []).forEach(function(f) {
+        totalFallas++;
+        porCategoria[f.cat] = (porCategoria[f.cat] || 0) + 1;
+        if (porSeveridad[f.sev] !== undefined) porSeveridad[f.sev]++;
+        const key = f.name;
+        if (!frecuencia[key]) frecuencia[key] = { count: 0, fechas: [] };
+        frecuencia[key].count++;
+        if (o.fecha) frecuencia[key].fechas.push(o.fecha);
+      });
+    });
+
+    // Top fallas (ordenadas desc)
+    const topFallas = Object.keys(frecuencia).map(function(name) {
+      const fechasOrd = frecuencia[name].fechas.slice().sort();
+      return { name: name, count: frecuencia[name].count, fechas: fechasOrd };
+    }).sort(function(a, b) { return b.count - a.count; }).slice(0, 10);
+
+    // Categorias ordenadas desc
+    const categorias = Object.keys(porCategoria).map(function(cat) {
+      return { cat: cat, count: porCategoria[cat] };
+    }).sort(function(a, b) { return b.count - a.count; });
+
+    // Guardar datos para el PDF
+    window._reporteData = {
+      ini: ini, fin: fin, unidad: unidadFiltro,
+      totalOTs: ots.length, totalFallas: totalFallas,
+      categorias: categorias, severidad: porSeveridad, topFallas: topFallas
+    };
+
+    // Render en pantalla (resumen breve) + boton PDF
+    cont.innerHTML =
+      '<div class="card" style="margin-bottom:12px">' +
+      '<div style="display:flex;gap:12px;margin-bottom:8px">' +
+      '<div style="flex:1;text-align:center"><div style="font-size:24px;font-weight:700;color:var(--brand-light)">' + ots.length + '</div><div style="font-size:11px;color:var(--text-muted)">Órdenes</div></div>' +
+      '<div style="flex:1;text-align:center"><div style="font-size:24px;font-weight:700;color:var(--brand-light)">' + totalFallas + '</div><div style="font-size:11px;color:var(--text-muted)">Fallas</div></div>' +
+      '</div>' +
+      '<div style="font-size:12px;color:var(--text-muted);text-align:center">Período: ' + fmtFechaRep(ini) + ' al ' + fmtFechaRep(fin) + (unidadFiltro ? ' · Unidad ' + unidadFiltro : '') + '</div>' +
+      '</div>' +
+      '<button onclick="imprimirReportePDF()" class="btn-primary" style="width:100%;padding:11px;font-size:14px">🖨️ Ver / Imprimir PDF</button>';
+
+  } catch(e) {
+    console.error(e);
+    cont.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Error al generar el reporte.</p>';
+  }
+}
+
+function fmtFechaRep(f) {
+  if (!f) return '';
+  const p = f.split('-');
+  return p[2] + '/' + p[1] + '/' + p[0];
+}
+
+function imprimirReportePDF() {
+  const d = window._reporteData;
+  if (!d) { showToast('Genera el reporte primero', true); return; }
+  const SEV_COLOR = { alta:'#E24B4A', media:'#BA7517', baja:'#639922' };
+  const ahora = new Date();
+  const fechaImpresion = ahora.toLocaleDateString('es-MX', { day:'2-digit', month:'short', year:'numeric' }) +
+    ' ' + String(ahora.getHours()).padStart(2,'0') + ':' + String(ahora.getMinutes()).padStart(2,'0');
+  const logoUrl = window.location.origin + '/img/logo-reporte.png';
+
+  let catRows = d.categorias.map(function(c) {
+    const pct = ((c.count / d.totalFallas) * 100).toFixed(1);
+    return '<tr><td>' + c.cat + '</td><td class="center">' + c.count + '</td><td class="center">' + pct + '%</td></tr>';
+  }).join('');
+
+  let topRows = d.topFallas.map(function(f, i) {
+    const fechasFmt = (f.fechas || []).map(function(fe) {
+      const p = fe.split('-');
+      return p[2] + '/' + p[1];
+    }).join(', ');
+    return '<tr><td class="num">' + (i+1) + '</td><td>' + f.name + '</td><td class="center">' + f.count + '</td><td class="fechas">' + fechasFmt + '</td></tr>';
+  }).join('');
+
+  const sevTotal = d.severidad.alta + d.severidad.media + d.severidad.baja;
+  function sevPct(n) { return sevTotal > 0 ? ((n/sevTotal)*100).toFixed(1) : '0'; }
+
+  const html = '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Reporte de Ordenes</title>' +
+    '<style>' +
+    '* { margin:0; padding:0; box-sizing:border-box; }' +
+    'body { font-family:Arial, sans-serif; color:#1a1a1a; padding:32px 40px; }' +
+    '.no-print { text-align:center; margin-bottom:20px; }' +
+    '.btn-print { background:#2C1E0F; color:#fff; border:none; padding:12px 24px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }' +
+    '.header { display:flex; align-items:center; justify-content:space-between; border-bottom:3px solid #2C1E0F; padding-bottom:16px; margin-bottom:24px; }' +
+    '.header img { height:56px; }' +
+    '.header .titulo h1 { font-size:22px; color:#2C1E0F; letter-spacing:1px; }' +
+    '.header .titulo p { font-size:13px; color:#666; margin-top:2px; }' +
+    '.meta { display:flex; gap:24px; margin-bottom:24px; font-size:13px; }' +
+    '.meta .campo strong { color:#2C1E0F; }' +
+    '.stats { display:flex; gap:16px; margin-bottom:28px; }' +
+    '.stat-box { flex:1; background:#F5EFE6; border-radius:10px; padding:18px; text-align:center; }' +
+    '.stat-box .num { font-size:32px; font-weight:700; color:#2C1E0F; }' +
+    '.stat-box .lbl { font-size:12px; color:#666; margin-top:4px; text-transform:uppercase; letter-spacing:0.5px; }' +
+    'h2 { font-size:15px; color:#2C1E0F; margin:24px 0 10px; padding-bottom:6px; border-bottom:1px solid #ddd; }' +
+    'table { width:100%; border-collapse:collapse; margin-bottom:8px; }' +
+    'th { background:#2C1E0F; color:#fff; font-size:11px; padding:8px 10px; text-align:left; text-transform:uppercase; letter-spacing:0.5px; }' +
+    'th.center, td.center { text-align:center; }' +
+    'td { border:1px solid #ddd; padding:7px 10px; font-size:13px; }' +
+    'td.num { width:36px; text-align:center; font-weight:700; background:#f5f5f5; }' +
+    'td.fechas { font-size:11px; color:#555; line-height:1.4; }' +
+    '.sev-row { display:flex; gap:12px; margin-bottom:8px; }' +
+    '.sev-card { flex:1; border-radius:8px; padding:14px; text-align:center; color:#fff; }' +
+    '.sev-card .n { font-size:24px; font-weight:700; }' +
+    '.sev-card .l { font-size:11px; text-transform:uppercase; letter-spacing:0.5px; margin-top:2px; }' +
+    '.pie { margin-top:32px; font-size:10px; color:#888; text-align:center; border-top:1px solid #eee; padding-top:12px; }' +
+    '@media print { .no-print { display:none; } body { padding:0; } }' +
+    '</style></head><body>' +
+    '<div class="no-print"><button class="btn-print" onclick="window.print()">Imprimir / Guardar PDF</button></div>' +
+    '<div class="header">' +
+    '<img src="' + logoUrl + '" alt="Alanis"/>' +
+    '<div class="titulo"><h1>REPORTE DE ÓRDENES DE TRABAJO</h1><p>Autotransportes Alanis</p></div>' +
+    '</div>' +
+    '<div class="meta">' +
+    '<div class="campo"><strong>Período:</strong> ' + fmtFechaRep(d.ini) + ' al ' + fmtFechaRep(d.fin) + '</div>' +
+    '<div class="campo"><strong>Unidad:</strong> ' + (d.unidad ? d.unidad : 'Todas') + '</div>' +
+    '<div class="campo"><strong>Generado:</strong> ' + fechaImpresion + '</div>' +
+    '<div class="campo"><strong>Por:</strong> ' + (adminNombre || 'Administrador') + '</div>' +
+    '</div>' +
+    '<div class="stats">' +
+    '<div class="stat-box"><div class="num">' + d.totalOTs + '</div><div class="lbl">Órdenes de trabajo</div></div>' +
+    '<div class="stat-box"><div class="num">' + d.totalFallas + '</div><div class="lbl">Fallas reportadas</div></div>' +
+    '</div>' +
+    '<h2>Desglose por severidad</h2>' +
+    '<div class="sev-row">' +
+    '<div class="sev-card" style="background:#E24B4A"><div class="n">' + d.severidad.alta + '</div><div class="l">Alta · ' + sevPct(d.severidad.alta) + '%</div></div>' +
+    '<div class="sev-card" style="background:#BA7517"><div class="n">' + d.severidad.media + '</div><div class="l">Media · ' + sevPct(d.severidad.media) + '%</div></div>' +
+    '<div class="sev-card" style="background:#639922"><div class="n">' + d.severidad.baja + '</div><div class="l">Baja · ' + sevPct(d.severidad.baja) + '%</div></div>' +
+    '</div>' +
+    '<h2>Desglose por categoría</h2>' +
+    '<table><thead><tr><th>Categoría</th><th class="center">Fallas</th><th class="center">%</th></tr></thead><tbody>' + catRows + '</tbody></table>' +
+    '<h2>Top fallas más frecuentes</h2>' +
+    '<table><thead><tr><th>#</th><th>Falla</th><th class="center">Veces</th><th>Fechas</th></tr></thead><tbody>' + topRows + '</tbody></table>' +
+    '<div class="pie">Autotransportes Alanis — Reporte generado el ' + fechaImpresion + '</div>' +
+    '</body></html>';
+
+  const win = window.open('', '_blank');
+  win.document.write(html);
+  win.document.close();
+}

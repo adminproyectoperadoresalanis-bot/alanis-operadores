@@ -1,0 +1,196 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function getRol() {
+      return get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.rol;
+    }
+    function isSuperAdmin() {
+      return request.auth != null && getRol() == 'superadmin';
+    }
+    function isAdmin() {
+      return request.auth != null && getRol() in ['admin', 'superadmin'];
+    }
+
+    match /usuarios/{uid} {
+      allow read:   if request.auth.uid == uid || isAdmin();
+      allow create: if isSuperAdmin()
+                    || (isAdmin() && request.resource.data.rol == 'operador');
+      allow update: if isSuperAdmin()
+                    || (isAdmin() && resource.data.rol == 'operador'
+                        && request.resource.data.rol == 'operador')
+                    || (request.auth.uid == uid
+                        && request.resource.data.rol == resource.data.rol);
+      allow delete: if isSuperAdmin();
+      match /historial_unidades/{hid} {
+        allow read, list: if isAdmin();
+        allow create:     if isAdmin();
+      }
+    }
+    match /solicitudes/{uid} {
+      allow create: if request.auth.uid == uid;
+      allow read:   if request.auth.uid == uid || isAdmin();
+      allow update: if isAdmin();
+    }
+    match /reportes/{id} {
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow read:   if request.auth.uid == resource.data.uid || isAdmin();
+      allow list:   if isAdmin();
+    }
+    match /ordenes_trabajo/{id} {
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow read:   if request.auth.uid == resource.data.uid || isAdmin();
+      allow update: if isAdmin();
+      allow list:   if isAdmin() || request.auth != null;
+      allow get:    if request.auth != null;
+    }
+    match /asignaciones/{id} {
+      allow read, list: if isAdmin();
+      allow write:      if isAdmin();
+    }
+    match /eventos/{id} {
+      allow create: if request.auth != null
+                    && request.resource.data.uid == request.auth.uid;
+      allow read:   if request.auth.uid == resource.data.uid || isAdmin();
+      allow list:   if isAdmin() || request.auth != null;
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // QR/CFDI — escaneo de destino (Opción B, sin Cloud Functions).
+    //
+    // ACTUALIZADO (2026-09-12): se agrega un camino de EXCEPCIÓN, para
+    // cuando el operador no puede escanear (cámara/luz/impresión) un
+    // embarque SIN FACTURA (QR interno). Restringido a:
+    //   - antes.receptorRFCEsperado == 'SIN-FACTURA' (nunca para embarques
+    //     con factura real — ahí la excepción no aplica y el camino normal
+    //     de abajo sigue siendo obligatorio).
+    //   - el operador que escribe sea el operadorAsignado del embarque.
+    // En ese caso el resultado siempre es VALIDADO (no hay documento real
+    // que comparar) y queda marcado con destinoEscaneo.viaExcepcion == true
+    // para auditoría. El camino normal (escaneo real) queda intacto.
+    // ------------------------------------------------------------------
+    function esEscaneoDestinoValido() {
+      let antes = resource.data;
+      let despues = request.resource.data;
+
+      let yaValidado = antes.estatusValidacion == 'VALIDADO' || antes.estatusValidacion == 'DISCREPANCIA';
+      let tieneOrigen = antes.uuidEsperado is string && antes.uuidEsperado.size() > 0
+                      && antes.receptorRFCEsperado is string && antes.receptorRFCEsperado.size() > 0;
+
+      let esExcepcion = despues.destinoEscaneo.get('viaExcepcion', false) == true;
+      let esSinFactura = antes.receptorRFCEsperado == 'SIN-FACTURA';
+      let operadorCoincideExcepcion = antes.get('operadorAsignado', null) != null
+                                    && antes.operadorAsignado.uid == despues.destinoEscaneo.escaneadoPor.uid;
+
+      let coincide = antes.uuidEsperado == despues.destinoEscaneo.uuidCfdi
+                  && antes.receptorRFCEsperado == despues.destinoEscaneo.rfcReceptor;
+      let estatusEsperadoNormal = coincide ? 'VALIDADO' : 'DISCREPANCIA';
+      let detalleEsperadoNormal = coincide
+        ? null
+        : (antes.uuidEsperado != despues.destinoEscaneo.uuidCfdi
+            ? 'UUID de CFDI no coincide con el esperado'
+            : 'RFC receptor no coincide con el esperado');
+
+      return !yaValidado
+        && tieneOrigen
+        && despues.destinoEscaneo.escaneadoPor.uid == request.auth.uid
+        && despues.destinoEscaneo.timestamp == request.time
+        && despues.validadoPor == request.auth.uid
+        && despues.uuidEsperado == antes.uuidEsperado
+        && despues.receptorRFCEsperado == antes.receptorRFCEsperado
+        && despues.diff(antes).affectedKeys().hasOnly([
+             'destinoEscaneo', 'estatusValidacion', 'validadoPor', 'discrepanciaDetalle'
+           ])
+        && (
+          esExcepcion
+            ? (esSinFactura
+                && operadorCoincideExcepcion
+                && despues.estatusValidacion == 'VALIDADO'
+                && despues.discrepanciaDetalle == null)
+            : (despues.estatusValidacion == estatusEsperadoNormal
+                && despues.discrepanciaDetalle == detalleEsperadoNormal)
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // QR/CFDI — Checkpoint 1: recepción del operador.
+    // Mismo mecanismo que el de destino: el cliente escribe recepcionOperador
+    // con su propio cálculo, pero la regla exige que ese cálculo sea el
+    // correcto (no puede "inventar" un resultado) y bloquea un segundo
+    // escaneo sobre un embarque que ya tiene recepción registrada.
+    //
+    // ACTUALIZADO (2026-09-07): además de comparar el documento (UUID+RFC),
+    // ahora también compara contra operadorAsignado — el operador que
+    // Operaciones eligió en ADREMATASA al hacer la 2da validación (ver
+    // firestore.rules de appadrematasainterno). Resultado de 3 estados, no
+    // 2, para poder distinguir de raíz "documento equivocado" de "esta
+    // carga no te corresponde" (decisión de Ivan, 2026-09-07):
+    //   COINCIDE              → documento correcto Y eres el operador asignado.
+    //   NO_COINCIDE_DOCUMENTO → el UUID/RFC del CFDI no es el esperado.
+    //   NO_COINCIDE_OPERADOR  → el documento sí es correcto, pero este
+    //                           embarque está asignado a otro operador.
+    // Si por alguna razón el embarque no trae operadorAsignado todavía
+    // (no debería pasar — es obligatorio del lado de ADREMATASA desde
+    // 2026-09-07), se trata como NO_COINCIDE_OPERADOR por seguridad, nunca
+    // como COINCIDE.
+    //
+    // ACTUALIZADO (2026-09-12): mismo camino de EXCEPCIÓN que en destino
+    // (ver esEscaneoDestinoValido) — solo embarques SIN-FACTURA, solo el
+    // operadorAsignado, siempre resulta en COINCIDE, marcado con
+    // recepcionOperador.viaExcepcion == true. El camino normal no cambia.
+    // ------------------------------------------------------------------
+    function esRecepcionOperadorValida() {
+      let antes = resource.data;
+      let despues = request.resource.data;
+
+      // OJO: si el campo no existe todavía en el documento (caso normal en
+      // un embarque recién creado), acceder con punto (antes.recepcionOperador)
+      // truena con error de evaluación en vez de dar null — y ese error se
+      // traduce en "permiso denegado" aunque todo lo demás esté bien. Por
+      // eso se usa get(campo, valorPorDefecto), que sí tolera el campo
+      // ausente. (Bug encontrado 2026-09-08 sobre un embarque de prueba
+      // limpio — no era contaminación de datos, era esto.)
+      let yaRecibido = antes.get('recepcionOperador', null) != null;
+      let tieneOrigen = antes.uuidEsperado is string && antes.uuidEsperado.size() > 0
+                      && antes.receptorRFCEsperado is string && antes.receptorRFCEsperado.size() > 0;
+
+      let esExcepcion = despues.recepcionOperador.get('viaExcepcion', false) == true;
+      let esSinFactura = antes.receptorRFCEsperado == 'SIN-FACTURA';
+
+      let documentoCoincide = antes.uuidEsperado == despues.recepcionOperador.uuidCfdi
+                            && antes.receptorRFCEsperado == despues.recepcionOperador.rfcReceptor;
+      let operadorCoincide = antes.get('operadorAsignado', null) != null
+                          && antes.operadorAsignado.uid == despues.recepcionOperador.uid;
+      let resultadoEsperadoNormal =
+        !documentoCoincide ? 'NO_COINCIDE_DOCUMENTO'
+        : (!operadorCoincide ? 'NO_COINCIDE_OPERADOR' : 'COINCIDE');
+
+      return !yaRecibido
+        && tieneOrigen
+        && despues.recepcionOperador.uid == request.auth.uid
+        && despues.recepcionOperador.timestamp == request.time
+        && despues.diff(antes).affectedKeys().hasOnly(['recepcionOperador'])
+        && (
+          esExcepcion
+            ? (esSinFactura && operadorCoincide && despues.recepcionOperador.resultado == 'COINCIDE')
+            : (despues.recepcionOperador.resultado == resultadoEsperadoNormal)
+        );
+    }
+
+    function esEscritorVBA() {
+      return request.auth != null
+        && request.auth.token.email == 'vba-escritor@alanis.local';
+    }
+
+    match /repositorio_mccain/{embarqueId} {
+      allow read: if request.auth != null;
+      allow create: if esEscritorVBA();
+      allow update: if esEscritorVBA()
+                    || (request.auth != null && (esEscaneoDestinoValido() || esRecepcionOperadorValida()));
+      allow delete: if false;
+    }
+  }
+}

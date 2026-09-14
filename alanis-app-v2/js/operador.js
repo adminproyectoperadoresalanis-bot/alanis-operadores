@@ -1,6 +1,4 @@
-// ============================================================
 // AUTOTRANSPORTES ALANÍS — Lógica del operador
-// ============================================================
 
 let currentUser = null;
 let userData    = null;
@@ -8,23 +6,19 @@ let selectedStatus = null;
 let selectedFallas = new Set();
 let toastTimer  = null;
 
-// ---------- INICIALIZACIÓN ----------
-auth.onAuthStateChanged(async user => {
+firebase.auth().onAuthStateChanged(async user => {
   if (!user) { window.location.href = 'index.html'; return; }
   currentUser = user;
 
-  // Cargar datos del usuario
-  const doc = await db.collection('usuarios').doc(user.uid).get();
+  const doc = await firebase.firestore().collection('usuarios').doc(user.uid).get();
   if (!doc.exists) { doLogout(); return; }
   userData = doc.data();
 
-  // Si es admin, redirigir
   if (userData.rol === 'admin' || userData.rol === 'supervisor') {
     window.location.href = 'admin.html'; return;
   }
 
-  // Inicializar UI
-  document.getElementById('header-sub').textContent = `Operador: ${userData.nombre}`;
+  document.getElementById('header-sub').textContent = 'Operador: ' + userData.nombre;
   setFecha();
   buildStatusList();
   verificarReporteHoy();
@@ -32,18 +26,15 @@ auth.onAuthStateChanged(async user => {
   cargarHistorial();
   cargarMisOTs();
 
-  // Modo oscuro guardado
   if (localStorage.getItem('darkMode') === '1') toggleDark();
 });
 
-// ---------- FECHA ----------
 function setFecha() {
   const opts = { weekday:'long', year:'numeric', month:'long', day:'numeric' };
   document.getElementById('fecha-hoy').textContent =
     new Date().toLocaleDateString('es-MX', opts);
 }
 
-// ---------- TABS ----------
 function switchTab(tab) {
   ['reporte','ot','historial'].forEach(t => {
     document.getElementById('tab-' + t).classList.add('hidden');
@@ -53,21 +44,18 @@ function switchTab(tab) {
   document.getElementById('nav-' + tab).classList.add('active');
 }
 
-// ---------- DARK MODE ----------
 function toggleDark() {
   document.body.classList.toggle('dark-mode');
   const on = document.body.classList.contains('dark-mode');
   localStorage.setItem('darkMode', on ? '1' : '0');
 }
 
-// ---------- LOGOUT ----------
 function doLogout() {
-  auth.signOut().then(() => window.location.href = 'index.html');
+  firebase.auth().signOut().then(() => window.location.href = 'index.html');
 }
 
-// ---------- STATUS LIST ----------
 const STATUSES = [
-  { id:'disponible',   label:'Disponible',          desc:'Listo para operar hoy',          color:'#639922' },
+  { id:'disponible',   label:'Disponible',          desc:'Listo para operar hoy',         color:'#639922' },
   { id:'taller',       label:'Taller',               desc:'Unidad en mantenimiento',        color:'#BA7517' },
   { id:'enfermo',      label:'Enfermo',              desc:'Incapacidad médica temporal',    color:'#E24B4A' },
   { id:'permiso',      label:'Solicitud de permiso', desc:'Permiso personal',               color:'#378ADD' },
@@ -92,10 +80,9 @@ function selectStatus(id) {
   document.getElementById('opt-' + id).classList.add('selected');
 }
 
-// ---------- VERIFICAR SI YA REPORTÓ HOY ----------
 async function verificarReporteHoy() {
-  const hoy = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  const snap = await db.collection('reportes')
+  const hoy = new Date().toISOString().split('T')[0];
+  const snap = await firebase.firestore().collection('reportes')
     .where('uid', '==', currentUser.uid)
     .where('fecha', '==', hoy)
     .limit(1).get();
@@ -105,12 +92,10 @@ async function verificarReporteHoy() {
     document.getElementById('btn-reporte').disabled = true;
     document.querySelectorAll('.status-option').forEach(el => el.style.pointerEvents = 'none');
     const r = snap.docs[0].data();
-    const s = STATUSES.find(x => x.id === r.estatus);
-    if (s) selectStatus(r.estatus);
+    selectStatus(r.estatus);
   }
 }
 
-// ---------- ENVIAR REPORTE ----------
 async function enviarReporte() {
   if (!selectedStatus) {
     showToast('Selecciona un estatus antes de enviar', true); return;
@@ -121,7 +106,7 @@ async function enviarReporte() {
 
   const hoy = new Date().toISOString().split('T')[0];
   try {
-    await db.collection('reportes').add({
+    await firebase.firestore().collection('reportes').add({
       uid:       currentUser.uid,
       operador:  userData.nombre,
       numero:    userData.numero || '',
@@ -132,7 +117,7 @@ async function enviarReporte() {
     document.getElementById('ya-reportado').classList.remove('hidden');
     document.querySelectorAll('.status-option').forEach(el => el.style.pointerEvents = 'none');
     const lbl = STATUSES.find(s => s.id === selectedStatus).label;
-    showToast(`Reporte enviado — Estatus: ${lbl}`);
+    showToast('Reporte enviado — Estatus: ' + lbl);
     cargarHistorial();
   } catch(e) {
     btn.disabled = false;
@@ -141,7 +126,6 @@ async function enviarReporte() {
   }
 }
 
-// ---------- CATÁLOGO DE FALLAS ----------
 function renderFallas() {
   const q = (document.getElementById('search-falla')?.value || '').toLowerCase();
   const filtered = FALLAS.filter(f =>
@@ -150,7 +134,8 @@ function renderFallas() {
   const SEV = { alta:'sev-alta Alta', media:'sev-media Media', baja:'sev-baja Baja' };
   document.getElementById('falla-list').innerHTML = filtered.length
     ? filtered.map(f => {
-        const [cls, lbl] = SEV[f.sev].split(' ');
+        const parts = SEV[f.sev].split(' ');
+        const cls = parts[0]; const lbl = parts[1];
         return `<div class="falla-item ${selectedFallas.has(f.id)?'checked':''}" id="fi-${f.id}" onclick="toggleFalla(${f.id})">
           <div class="falla-checkbox"></div>
           <div><div class="falla-cat">${f.cat}</div><div class="falla-name">${f.name}</div></div>
@@ -187,14 +172,9 @@ function updateFallaUI() {
   } else box.classList.add('hidden');
 }
 
-// ---------- ENVIAR OT ----------
 async function enviarOT() {
   if (selectedFallas.size === 0) {
     showToast('Selecciona al menos una falla', true); return;
-  }
-  const unidad = document.getElementById('ot-unidad').value.trim();
-  if (!unidad) {
-    showToast('Ingresa el número económico de la unidad', true); return;
   }
 
   const btn = document.getElementById('btn-ot');
@@ -205,21 +185,20 @@ async function enviarOT() {
   const fallasArr = [...selectedFallas].map(id => FALLAS.find(f => f.id === id)).filter(Boolean);
 
   try {
-    await db.collection('ordenes_trabajo').add({
+    await firebase.firestore().collection('ordenes_trabajo').add({
       uid:       currentUser.uid,
       operador:  userData.nombre,
       numero:    userData.numero || '',
-      unidad:    unidad,
+      unidad:    userData.numero || 'Sin asignar',
       folio:     folio,
       fallas:    fallasArr,
       estado:    'pendiente',
       fecha:     new Date().toISOString().split('T')[0],
       timestamp: firebase.firestore.FieldValue.serverTimestamp(),
     });
-    showToast(`${folio} creada — ${fallasArr.length} falla(s)`);
+    showToast(folio + ' creada — ' + fallasArr.length + ' falla(s)');
     selectedFallas.clear();
     document.getElementById('search-falla').value = '';
-    document.getElementById('ot-unidad').value = '';
     updateFallaUI();
     renderFallas();
     cargarMisOTs();
@@ -231,9 +210,8 @@ async function enviarOT() {
   }
 }
 
-// ---------- HISTORIAL ----------
 async function cargarHistorial() {
-  const snap = await db.collection('reportes')
+  const snap = await firebase.firestore().collection('reportes')
     .where('uid', '==', currentUser.uid)
     .orderBy('timestamp', 'desc')
     .limit(15).get();
@@ -242,11 +220,15 @@ async function cargarHistorial() {
   const LBL = { disponible:'Disponible', taller:'Taller', enfermo:'Enfermo', permiso:'Permiso', incapacitado:'Incapacitado' };
 
   const el = document.getElementById('historial-list');
-  if (snap.empty) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Sin reportes aún.</p>'; return; }
+  if (snap.empty) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Sin reportes aún.</p>';
+    return;
+  }
 
   el.innerHTML = snap.docs.map(d => {
     const r = d.data();
-    const fecha = r.fecha ? new Date(r.fecha + 'T12:00:00').toLocaleDateString('es-MX', { weekday:'short', day:'numeric', month:'short', year:'numeric' }) : '—';
+    const fecha = r.fecha ? new Date(r.fecha + 'T12:00:00').toLocaleDateString('es-MX',
+      { weekday:'short', day:'numeric', month:'short', year:'numeric' }) : '—';
     return `<div class="historial-item">
       <div class="historial-fecha">${fecha}</div>
       <div class="historial-status">
@@ -257,20 +239,23 @@ async function cargarHistorial() {
   }).join('');
 }
 
-// ---------- MIS OTS ----------
 async function cargarMisOTs() {
-  const snap = await db.collection('ordenes_trabajo')
+  const snap = await firebase.firestore().collection('ordenes_trabajo')
     .where('uid', '==', currentUser.uid)
     .orderBy('timestamp', 'desc')
     .limit(10).get();
 
   const el = document.getElementById('mis-ots');
-  if (snap.empty) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:16px">Sin órdenes de trabajo aún.</p>'; return; }
+  if (snap.empty) {
+    el.innerHTML = '<p class="text-muted" style="text-align:center;padding:16px">Sin órdenes de trabajo aún.</p>';
+    return;
+  }
 
   const ESTADO = { pendiente:'🟡 Pendiente', en_proceso:'🔵 En proceso', resuelto:'🟢 Resuelto' };
   el.innerHTML = snap.docs.map(d => {
     const o = d.data();
-    const fecha = o.fecha ? new Date(o.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day:'numeric', month:'short', year:'numeric' }) : '—';
+    const fecha = o.fecha ? new Date(o.fecha + 'T12:00:00').toLocaleDateString('es-MX',
+      { day:'numeric', month:'short', year:'numeric' }) : '—';
     return `<div class="ot-folio-item">
       <div>
         <div class="ot-folio-num">${o.folio}</div>
@@ -281,10 +266,8 @@ async function cargarMisOTs() {
   }).join('');
 }
 
-// ---------- TOAST ----------
 function showToast(msg, warn = false) {
-  const t   = document.getElementById('toast');
-  const svg = t.querySelector('svg');
+  const t = document.getElementById('toast');
   document.getElementById('toast-msg').textContent = msg;
   t.className = 'toast' + (warn ? ' toast-warn' : '');
   void t.offsetWidth;
