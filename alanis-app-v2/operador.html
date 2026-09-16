@@ -105,6 +105,8 @@
     .doc-btn-title { font-size:16px; font-weight:700; color:var(--text-primary); }
     .doc-btn-sub { font-size:12px; color:var(--text-muted); margin-top:3px; line-height:1.3; }
     .doc-btn-arrow { font-size:24px; color:var(--text-muted); font-weight:300; }
+    .doc-btn.doc-btn-disabled { opacity:0.45; }
+    .doc-btn.doc-btn-disabled:active { transform:none; background:var(--bg-card); }
 
     .doc-excepcion-link { display:flex; align-items:center; justify-content:center; gap:6px; text-align:center; font-size:12.5px; color:var(--text-muted); padding:2px 8px 18px; cursor:pointer; }
     .doc-excepcion-link strong { color:#92400E; font-weight:700; }
@@ -319,11 +321,11 @@
 
   <div class="hidden" id="doc-qr-intercambio-tarjeta"></div>
 
-  <div class="doc-btn" onclick="abrirEscaneoDocumentacion('pre_entrega')">
+  <div class="doc-btn doc-btn-disabled" id="doc-btn-checkpoint2" onclick="abrirEscaneoDocumentacion('pre_entrega')">
     <span class="doc-btn-icon">🚚</span>
     <div class="doc-btn-text">
       <div class="doc-btn-title">Checkpoint 2 · Pre-entrega</div>
-      <div class="doc-btn-sub">Antes de presentarte con el cliente, vuelve a escanear el QR de la factura.</div>
+      <div class="doc-btn-sub" id="doc-checkpoint2-sub">Disponible después de completar el Checkpoint 1 de tu embarque asignado.</div>
     </div>
     <span class="doc-btn-arrow">›</span>
   </div>

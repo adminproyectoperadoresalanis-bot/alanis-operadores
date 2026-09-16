@@ -796,6 +796,19 @@ async function buscarEmbarquesAsignados() {
 // después, ya con la info en pantalla). Checkpoint 2 (pre-entrega) sigue
 // exactamente igual que antes — no usa este pre-check.
 async function abrirEscaneoDocumentacion(checkpoint) {
+  // Checkpoint 2 (pre-entrega) no debe estar disponible mientras Checkpoint
+  // 1 no se haya completado — pedido de Ivan (2026-09-16), después de ver
+  // que el botón se veía tocable aunque el operador todavía no hubiera
+  // hecho el despacho. checkpoint2Habilitado lo mantiene actualizado
+  // cargarTarjetaQRIntercambio() (mismo criterio que ya usa para mostrar la
+  // tarjeta de "Mostrar QR de intercambio": recepción en COINCIDE y
+  // pre-entrega todavía sin registrar). Esto es un candado de UI para
+  // evitar el toque accidental — no reemplaza ninguna validación de
+  // Firestore.
+  if (checkpoint === 'pre_entrega' && !checkpoint2Habilitado) {
+    showToast('Primero completa el Checkpoint 1 de tu embarque asignado.', true);
+    return;
+  }
   docCheckpointActual = checkpoint;
   docDatosLeidos = null;
   docEmbarqueEncontrado = null;
@@ -1339,15 +1352,49 @@ function cerrarExcepcion() {
 // desaparece sola.
 let tarjetaQRIntercambioEmbarque = null;
 
+// Checkpoint 2 (pre-entrega) no debe estar disponible mientras Checkpoint 1
+// no se haya completado para el embarque abierto del operador (pedido de
+// Ivan, 2026-09-16). checkpoint2Habilitado se recalcula cada vez que corre
+// cargarTarjetaQRIntercambio() — mismo criterio ("listos", abajo) que ya
+// decide si se muestra la tarjeta de "Mostrar QR de intercambio": recepción
+// en COINCIDE y pre-entrega todavía sin registrar. Arranca en false (igual
+// que el HTML, que ya carga el botón visualmente deshabilitado) para que,
+// si esta consulta tarda o falla, el botón se quede bloqueado en vez de
+// quedar disponible por default.
+// NOTA — alcance decidido con Ivan (2026-09-16): esto es solo un candado de
+// UI para evitar el toque accidental. No revisa que el embarque sea del
+// operador que escanea en Checkpoint 2 (ese hueco existe desde antes, ver
+// nota en docManejarLectura/confirmarRegistroDoc) ni cierra el acceso por
+// "Excepción" en embarques sin factura — ambos quedaron fuera de alcance
+// por ahora, a propósito.
+let checkpoint2Habilitado = false;
+
+function actualizarDisponibilidadCheckpoint2(habilitado) {
+  checkpoint2Habilitado = habilitado;
+  const btn = document.getElementById('doc-btn-checkpoint2');
+  const sub = document.getElementById('doc-checkpoint2-sub');
+  if (!btn) return;
+  if (habilitado) {
+    btn.classList.remove('doc-btn-disabled');
+    if (sub) sub.textContent = 'Antes de presentarte con el cliente, vuelve a escanear el QR de la factura.';
+  } else {
+    btn.classList.add('doc-btn-disabled');
+    if (sub) sub.textContent = 'Disponible después de completar el Checkpoint 1 de tu embarque asignado.';
+  }
+}
+
 async function cargarTarjetaQRIntercambio() {
-  const cont = document.getElementById('doc-qr-intercambio-tarjeta');
-  if (!cont || !currentUser) return;
+  if (!currentUser) return;
   try {
     const asignados = await buscarEmbarquesAsignados();
     const listos = asignados.filter(function(e) {
       return e.recepcionOperador && e.recepcionOperador.resultado === 'COINCIDE'
         && e.estatusValidacion !== 'VALIDADO' && e.estatusValidacion !== 'DISCREPANCIA';
     });
+    actualizarDisponibilidadCheckpoint2(listos.length > 0);
+
+    const cont = document.getElementById('doc-qr-intercambio-tarjeta');
+    if (!cont) return;
     if (listos.length === 0) {
       tarjetaQRIntercambioEmbarque = null;
       cont.innerHTML = '';
