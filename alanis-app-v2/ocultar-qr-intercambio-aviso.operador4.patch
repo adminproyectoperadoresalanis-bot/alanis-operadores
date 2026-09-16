@@ -1,0 +1,32 @@
+--- a/js/operador4.js
++++ b/js/operador4.js
+@@ -1160,21 +1160,17 @@
+   }
+
+   // Botón "Mostrar QR de intercambio" (nuevo, 2026-09-16): solo aparece
+-  // justo al completar Checkpoint 1 con éxito — es el momento en que ya se
+-  // sabe con certeza que este operador y este embarque quedaron validados.
+-  // docEmbarqueEncontrado todavía tiene el embarque aquí (cerrarResultadoDoc
+-  // es quien lo limpia, al cerrar esta pantalla).
++  // ya NO se muestra en esta pantalla de aviso de Checkpoint 1 — ajustado
++  // esa misma noche por petición de Ivan. El QR de intercambio se sigue
++  // ofreciendo correctamente como tarjeta en la sección Documentación,
++  // justo después de completar Checkpoint 1. Se deja el elemento en el
++  // HTML por si se necesita en otro lado, pero esta función siempre lo
++  // oculta.
+   const qrBtn = document.getElementById('doc-resultado-qr-btn');
+   if (qrBtn) {
+-    if (docCheckpointActual === 'recepcion' && resultado === 'COINCIDE' && docEmbarqueEncontrado) {
+-      const embarqueId = docEmbarqueEncontrado.id;
+-      qrBtn.classList.remove('hidden');
+-      qrBtn.onclick = function() { abrirQRIntercambio(embarqueId); };
+-    } else {
+-      qrBtn.classList.add('hidden');
+-      qrBtn.onclick = null;
+-    }
++    qrBtn.classList.add('hidden');
++    qrBtn.onclick = null;
+   }
+ }
+
+ function docDetenerAlarmaDoc() {

@@ -1,0 +1,24 @@
+--- a/firestore.rules
++++ b/firestore.rules
+@@ -179,6 +179,20 @@ service cloud.firestore {
+                     || (request.auth != null && (esEscaneoDestinoValido() || esRecepcionOperadorValida()));
+       allow delete: if false;
+     }
++
++    // ------------------------------------------------------------------
++    // Candado de intercambio — QR de un solo uso (checkpoint del portón).
++    // Solo las Cloud Functions (generarTokenIntercambio,
++    // validarTokenIntercambio) tocan estas colecciones, vía Admin SDK —
++    // eso se salta las reglas por completo. El único propósito de estas
++    // reglas es bloquear cualquier acceso directo desde un cliente
++    // (navegador/app), que nunca debería leer ni escribir aquí. Ver
++    // claude/candado-intercambio-implementacion.md.
++    // ------------------------------------------------------------------
++    match /tokensIntercambio/{tokenId} {
++      allow read, write: if false;
++    }
++    match /bitacoraValidacionesIntercambio/{id} {
++      allow read, write: if false;
++    }
+   }
+ }
