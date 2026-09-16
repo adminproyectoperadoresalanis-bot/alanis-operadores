@@ -206,3 +206,15 @@ exports.sincronizarOperadoresAlanis = onDocumentWritten(
     }
   }
 );
+// ============================================================================
+// Candado de intercambio — QR de un solo uso (checkpoint del portón).
+//
+// generarTokenIntercambio (callable) y validarTokenIntercambio (HTTPS, la
+// "puerta" que toca la tablet de Adrematasa Oficial / Misael) viven en sus
+// propios archivos junto a este, ya construidos y probados — ver
+// claude/candado-intercambio-implementacion.md para el diseño completo.
+// Mismo proyecto, mismo Firestore, sin cuenta de servicio ni segundo
+// proyecto: repositorio_mccain es la fuente de verdad aquí mismo.
+// ============================================================================
+exports.generarTokenIntercambio = require("./generarTokenIntercambio").generarTokenIntercambio;
+exports.validarTokenIntercambio = require("./validarTokenIntercambio").validarTokenIntercambio;
