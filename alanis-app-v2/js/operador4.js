@@ -806,6 +806,7 @@ async function abrirEscaneoDocumentacion(checkpoint) {
   document.getElementById('doc-modal-no-encontrado').classList.add('hidden');
   document.getElementById('doc-modal-buscando').classList.add('hidden');
   document.getElementById('doc-modal-cancelar-wrap').classList.remove('hidden');
+  document.getElementById('doc-no-encontrado-reescanear-btn').classList.remove('hidden');
   document.getElementById('doc-modal').classList.remove('hidden');
 
   if (checkpoint === 'recepcion') {
@@ -824,8 +825,16 @@ async function abrirEscaneoDocumentacion(checkpoint) {
     document.getElementById('doc-modal-buscando').classList.add('hidden');
 
     if (pendientes.length === 0) {
+      // Sin embarque asignado no hay nada contra qué comparar todavía — ni
+      // siquiera se llegó a abrir la cámara (docEmbarqueEncontrado sigue en
+      // null). "Volver a escanear" no aplica aquí: no es un caso de "el
+      // documento no coincidió", es "no tienes nada asignado". Si se dejara
+      // el botón y el operador insistiera en escanear, docManejarLectura
+      // tronaría al intentar leer .uuidEsperado de un docEmbarqueEncontrado
+      // nulo. Se oculta el botón y solo queda "Cerrar".
       document.getElementById('doc-no-encontrado-msg').textContent =
         'No tienes ningún embarque asignado pendiente de despacho. Si Operaciones acaba de asignarte, espera unos minutos — puede tardar en sincronizar — e intenta de nuevo.';
+      document.getElementById('doc-no-encontrado-reescanear-btn').classList.add('hidden');
       document.getElementById('doc-modal-no-encontrado').classList.remove('hidden');
       document.getElementById('doc-modal-cancelar-wrap').classList.add('hidden');
       return;
