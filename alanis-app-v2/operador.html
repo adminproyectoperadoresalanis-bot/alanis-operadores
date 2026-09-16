@@ -134,6 +134,11 @@
     .doc-resultado-detalle { font-size:16px; color:#fff; margin:0 0 20px; line-height:1.5; white-space:pre-line; }
     .doc-resultado-tel { display:block; font-size:16px; font-weight:700; color:#fff; background:rgba(255,255,255,0.18); border-radius:10px; padding:10px 14px; margin-bottom:8px; text-decoration:none; }
     .doc-resultado-btn { margin-top:8px; background:#fff; color:#2C1E0F; border:none; border-radius:10px; padding:14px; font-size:15px; font-weight:700; width:100%; max-width:360px; cursor:pointer; }
+    .doc-resultado-btn-qr { background:#92400E; color:#fff; }
+    .doc-resultado-btn-qr.hidden { display:none; }
+
+    .qr-intercambio-contenedor { display:flex; align-items:center; justify-content:center; min-height:220px; margin:4px 0; background:#fff; border-radius:10px; padding:12px; }
+    .qr-intercambio-estado { text-align:center; font-size:13px; }
   </style>
 </head>
 <body>
@@ -312,6 +317,8 @@
   </div>
   <div class="doc-excepcion-link" onclick="abrirExcepcion('recepcion')">¿No puedes escanear? <strong>Excepción</strong></div>
 
+  <div class="hidden" id="doc-qr-intercambio-tarjeta"></div>
+
   <div class="doc-btn" onclick="abrirEscaneoDocumentacion('pre_entrega')">
     <span class="doc-btn-icon">🚚</span>
     <div class="doc-btn-text">
@@ -356,6 +363,10 @@
     <h2 id="doc-modal-titulo">Escanear CFDI</h2>
     <p class="doc-modal-nota" id="doc-modal-nota"></p>
     <div class="doc-modal-error" id="doc-modal-error"></div>
+
+    <div id="doc-modal-buscando" class="hidden">
+      <p class="doc-modal-nota">Verificando tu asignación…</p>
+    </div>
 
     <div id="doc-modal-captura">
       <div id="doc-qr-reader"></div>
@@ -438,16 +449,34 @@
     <div class="doc-resultado-titulo" id="doc-resultado-titulo"></div>
     <div class="doc-resultado-detalle" id="doc-resultado-detalle"></div>
     <div id="doc-resultado-telefonos"></div>
+    <button class="doc-resultado-btn doc-resultado-btn-qr hidden" id="doc-resultado-qr-btn">🔑 Mostrar QR de intercambio</button>
     <button class="doc-resultado-btn" id="doc-resultado-btn" onclick="cerrarResultadoDoc()">Continuar</button>
   </div>
 </div>
 
+<!-- MODAL QR DE INTERCAMBIO (candado de intercambio, puerta/tablet del intercambista) -->
+<div class="doc-modal-overlay hidden" id="qr-intercambio-modal">
+  <div class="doc-modal-card">
+    <h2>Código para el intercambista</h2>
+    <p class="doc-modal-nota">Muéstrale esta pantalla al intercambista en el portón. El código es de un solo uso y vence en unos minutos.</p>
+    <div id="qr-intercambio-contenedor" class="qr-intercambio-contenedor"></div>
+    <p class="doc-modal-nota qr-intercambio-estado" id="qr-intercambio-estado">Generando código...</p>
+    <div class="doc-modal-actions">
+      <button class="btn-secondary" id="qr-intercambio-btn-regenerar" onclick="regenerarQRIntercambio()">Generar nuevo código</button>
+      <button class="btn-primary" onclick="cerrarQRIntercambio()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script src="js/data.js?v=5"></script>
-<script src="js/operador4.js?v=12"></script>
+<script src="js/mostrar-qr-intercambio.js?v=1"></script>
+<script src="js/operador4.js?v=13"></script>
 </body>
 </html>

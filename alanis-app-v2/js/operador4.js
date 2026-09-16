@@ -135,6 +135,7 @@ firebase.auth().onAuthStateChanged(async user => {
   mostrarNivel('seleccion');
   cargarUltimoEstatus();
   cargarHistorial();
+  cargarTarjetaQRIntercambio();
   if (localStorage.getItem('darkMode') === '1') toggleDark();
 });
 
@@ -642,6 +643,7 @@ function switchTab(tab) {
   document.getElementById('tab-' + tab).classList.remove('hidden');
   document.getElementById('nav-' + tab).classList.add('active');
   if (tab === 'asignaciones') cargarAsignacionesOp();
+  if (tab === 'documentacion') cargarTarjetaQRIntercambio();
   // Contenedor flotante solo en tab reporte
   const cont = document.getElementById('reporte-flotante');
   if (cont && tab !== 'reporte') { cont.classList.add('hidden'); cont.classList.remove('flotante'); }
@@ -770,18 +772,76 @@ const DOC_NOTAS = {
   pre_entrega: 'Antes de presentarte con el cliente: vuelve a escanear el QR de la misma factura.'
 };
 
-function abrirEscaneoDocumentacion(checkpoint) {
+// Busca, en una sola consulta, todos los embarques de repositorio_mccain
+// asignados al operador actual (operadorAsignado.uid). Se reusa tanto para
+// el pre-check de Checkpoint 1 como para la tarjeta de "Mostrar QR de
+// intercambio" en la pestaña Documentación — cada quien filtra el
+// resultado según lo que necesita.
+async function buscarEmbarquesAsignados() {
+  const snap = await firebase.firestore().collection('repositorio_mccain')
+    .where('operadorAsignado.uid', '==', currentUser.uid)
+    .get();
+  return snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+}
+
+// ACTUALIZADO (2026-09-16): Checkpoint 1 (recepción) ya no abre la cámara a
+// ciegas para luego buscar por lo que se escanee — primero confirma, contra
+// repositorio_mccain, que el operador tiene una asignación pendiente en
+// este checkpoint. Si la tiene, guarda ESE documento en docEmbarqueEncontrado
+// y docManejarLectura compara lo escaneado contra él (nunca vuelve a
+// buscar). Así ningún operador puede ver el shipment/cliente/caja de un
+// embarque que no es el suyo con solo escanear un QR ajeno — antes de esto,
+// docManejarLectura buscaba por el UUID escaneado y mostraba esos datos
+// aunque el embarque fuera de otro operador (el chequeo de operador llegaba
+// después, ya con la info en pantalla). Checkpoint 2 (pre-entrega) sigue
+// exactamente igual que antes — no usa este pre-check.
+async function abrirEscaneoDocumentacion(checkpoint) {
   docCheckpointActual = checkpoint;
   docDatosLeidos = null;
   docEmbarqueEncontrado = null;
   document.getElementById('doc-modal-titulo').textContent = DOC_TITULOS[checkpoint] || 'Escanear CFDI';
   document.getElementById('doc-modal-nota').textContent = DOC_NOTAS[checkpoint] || '';
   document.getElementById('doc-modal-error').textContent = '';
-  document.getElementById('doc-modal-captura').classList.remove('hidden');
   document.getElementById('doc-modal-confirmar').classList.add('hidden');
   document.getElementById('doc-modal-no-encontrado').classList.add('hidden');
+  document.getElementById('doc-modal-buscando').classList.add('hidden');
   document.getElementById('doc-modal-cancelar-wrap').classList.remove('hidden');
   document.getElementById('doc-modal').classList.remove('hidden');
+
+  if (checkpoint === 'recepcion') {
+    document.getElementById('doc-modal-captura').classList.add('hidden');
+    document.getElementById('doc-modal-buscando').classList.remove('hidden');
+    let asignados;
+    try {
+      asignados = await buscarEmbarquesAsignados();
+    } catch (e) {
+      document.getElementById('doc-modal-buscando').classList.add('hidden');
+      document.getElementById('doc-modal-error').textContent = 'No se pudo verificar tu asignación: ' + e.message;
+      document.getElementById('doc-modal-captura').classList.remove('hidden');
+      return;
+    }
+    const pendientes = asignados.filter(function(e) { return !e.recepcionOperador; });
+    document.getElementById('doc-modal-buscando').classList.add('hidden');
+
+    if (pendientes.length === 0) {
+      document.getElementById('doc-no-encontrado-msg').textContent =
+        'No tienes ningún embarque asignado pendiente de despacho. Si Operaciones acaba de asignarte, espera unos minutos — puede tardar en sincronizar — e intenta de nuevo.';
+      document.getElementById('doc-modal-no-encontrado').classList.remove('hidden');
+      document.getElementById('doc-modal-cancelar-wrap').classList.add('hidden');
+      return;
+    }
+    if (pendientes.length > 1) {
+      // Un operador solo puede tener 1 embarque abierto a la vez (regla
+      // aplicada del lado de Operaciones desde 2026-09-16) — más de uno
+      // aquí solo puede ser un caso heredado de antes de esa regla. Se usa
+      // el primero y se deja constancia en consola, sin bloquear al
+      // operador por un caso que ya no debería volver a ocurrir.
+      console.warn('Operador con más de 1 embarque abierto (caso heredado):', currentUser.uid, pendientes.map(function(e) { return e.id; }));
+    }
+    docEmbarqueEncontrado = pendientes[0];
+  }
+
+  document.getElementById('doc-modal-captura').classList.remove('hidden');
   docPedirWakeLock();
   docIniciarCamara();
 }
@@ -825,6 +885,39 @@ async function docManejarLectura(datos) {
   docDetenerCamara();
   document.getElementById('doc-modal-error').textContent = '';
 
+  if (docCheckpointActual === 'recepcion') {
+    // El embarque ya se conoce desde el pre-check en abrirEscaneoDocumentacion
+    // (antes de abrir la cámara) — aquí solo se compara lo escaneado contra
+    // ESE documento, nunca se vuelve a buscar en Firestore por el UUID
+    // leído. Si no corresponde, se rechaza el escaneo sin registrar nada
+    // (se puede volver a intentar con "Volver a escanear") — el pre-check
+    // ya garantiza que este embarque es del operador que está escaneando,
+    // así que aquí no puede salir NO_COINCIDE_OPERADOR.
+    const coincideDoc = docEmbarqueEncontrado.uuidEsperado === datos.uuid
+      && docEmbarqueEncontrado.receptorRFCEsperado === datos.rfc;
+
+    if (!coincideDoc) {
+      document.getElementById('doc-modal-captura').classList.add('hidden');
+      document.getElementById('doc-no-encontrado-msg').textContent =
+        'Esta factura no corresponde a tu embarque asignado (' + (docEmbarqueEncontrado.shipment || docEmbarqueEncontrado.id) + '). Verifica que es el documento correcto e inténtalo de nuevo.';
+      document.getElementById('doc-modal-no-encontrado').classList.remove('hidden');
+      document.getElementById('doc-modal-cancelar-wrap').classList.add('hidden');
+      return;
+    }
+
+    document.getElementById('doc-info-embarque').innerHTML =
+      '<strong>Shipment:</strong> ' + docEsc(docEmbarqueEncontrado.shipment || '—') + '<br>' +
+      '<strong>Cliente:</strong> ' + docEsc(docEmbarqueEncontrado.clienteNombre || '—') + '<br>' +
+      '<strong>OC Cliente:</strong> ' + docEsc(docEmbarqueEncontrado.ocCliente || '—') + '<br>' +
+      '<strong>Caja/remolque:</strong> ' + docEsc(docEmbarqueEncontrado.caja || '—') +
+      '<br><br>Verifica que estos datos correspondan a la factura que tienes en la mano.';
+    document.getElementById('doc-modal-captura').classList.add('hidden');
+    document.getElementById('doc-modal-confirmar').classList.remove('hidden');
+    return;
+  }
+
+  // Checkpoint 2 (pre-entrega) — sin cambios: sigue buscando en
+  // repositorio_mccain por el UUID escaneado, tal como siempre.
   let encontrado;
   try {
     const snap = await firebase.firestore().collection('repositorio_mccain')
@@ -872,16 +965,11 @@ async function docManejarLectura(datos) {
     return;
   }
 
-  // Ya se registró este checkpoint antes — no se puede volver a escribir
-  // (la regla de Firestore lo bloquearía de todas formas).
-  if (docCheckpointActual === 'recepcion' && encontrado.recepcionOperador) {
-    document.getElementById('doc-modal-error').textContent =
-      'Ya se registró el despacho de este embarque (' + (encontrado.recepcionOperador.nombre || 'otro usuario') + ').';
-    document.getElementById('doc-modal-captura').classList.remove('hidden');
-    docIniciarCamara();
-    return;
-  }
-  if (docCheckpointActual === 'pre_entrega' && (encontrado.estatusValidacion === 'VALIDADO' || encontrado.estatusValidacion === 'DISCREPANCIA')) {
+  // Ya se registró la pre-entrega de este embarque antes — no se puede
+  // volver a escribir (la regla de Firestore lo bloquearía de todas
+  // formas). Checkpoint 1 (recepción) ya no llega hasta aquí — su propio
+  // chequeo de "ya se registró" ocurre en el pre-check, antes de escanear.
+  if (encontrado.estatusValidacion === 'VALIDADO' || encontrado.estatusValidacion === 'DISCREPANCIA') {
     document.getElementById('doc-modal-error').textContent =
       'Ya se registró la pre-entrega de este embarque.';
     document.getElementById('doc-modal-captura').classList.remove('hidden');
@@ -1048,6 +1136,23 @@ function mostrarResultadoDoc(resultado) {
       docVibrar('discrepancia');
     }, 1400);
   }
+
+  // Botón "Mostrar QR de intercambio" (nuevo, 2026-09-16): solo aparece
+  // justo al completar Checkpoint 1 con éxito — es el momento en que ya se
+  // sabe con certeza que este operador y este embarque quedaron validados.
+  // docEmbarqueEncontrado todavía tiene el embarque aquí (cerrarResultadoDoc
+  // es quien lo limpia, al cerrar esta pantalla).
+  const qrBtn = document.getElementById('doc-resultado-qr-btn');
+  if (qrBtn) {
+    if (docCheckpointActual === 'recepcion' && resultado === 'COINCIDE' && docEmbarqueEncontrado) {
+      const embarqueId = docEmbarqueEncontrado.id;
+      qrBtn.classList.remove('hidden');
+      qrBtn.onclick = function() { abrirQRIntercambio(embarqueId); };
+    } else {
+      qrBtn.classList.add('hidden');
+      qrBtn.onclick = null;
+    }
+  }
 }
 
 function docDetenerAlarmaDoc() {
@@ -1057,9 +1162,16 @@ function docDetenerAlarmaDoc() {
 function cerrarResultadoDoc() {
   docDetenerAlarmaDoc();
   document.getElementById('doc-resultado').classList.add('hidden');
+  const qrBtn = document.getElementById('doc-resultado-qr-btn');
+  if (qrBtn) { qrBtn.classList.add('hidden'); qrBtn.onclick = null; }
   docCheckpointActual = null;
   docDatosLeidos = null;
   docEmbarqueEncontrado = null;
+  // Si este checkpoint acaba de habilitar el QR de intercambio (o si había
+  // uno vigente que ya se cerró con Checkpoint 2), la tarjeta en la
+  // pestaña Documentación se actualiza sola — sin esperar a que el
+  // operador la vuelva a abrir.
+  cargarTarjetaQRIntercambio();
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1202,4 +1314,51 @@ function cerrarExcepcion() {
   excCheckpointActual = null;
   excEmbarqueSeleccionado = null;
   excCandidatos = [];
+}
+
+// ═══════════════════════════════════════════════════════════════
+// QR DE INTERCAMBIO — tarjeta en la pestaña Documentación
+// ═══════════════════════════════════════════════════════════════
+// Decisión de Ivan (2026-09-16): además del botón que aparece justo al
+// completar Checkpoint 1 (ver mostrarResultadoDoc), se deja una tarjeta
+// fija en Documentación para que el operador pueda volver a mostrar su QR
+// de intercambio más tarde sin tener que re-escanear nada. Se muestra
+// mientras el embarque siga "abierto" con la misma definición que ya usa
+// Operaciones del lado de ADREMATASA (un operador, un embarque abierto a
+// la vez): Checkpoint 1 en COINCIDE y Checkpoint 2 (pre-entrega) todavía
+// sin completar. En cuanto se registra la pre-entrega, la tarjeta
+// desaparece sola.
+let tarjetaQRIntercambioEmbarque = null;
+
+async function cargarTarjetaQRIntercambio() {
+  const cont = document.getElementById('doc-qr-intercambio-tarjeta');
+  if (!cont || !currentUser) return;
+  try {
+    const asignados = await buscarEmbarquesAsignados();
+    const listos = asignados.filter(function(e) {
+      return e.recepcionOperador && e.recepcionOperador.resultado === 'COINCIDE'
+        && e.estatusValidacion !== 'VALIDADO' && e.estatusValidacion !== 'DISCREPANCIA';
+    });
+    if (listos.length === 0) {
+      tarjetaQRIntercambioEmbarque = null;
+      cont.innerHTML = '';
+      cont.classList.add('hidden');
+      return;
+    }
+    tarjetaQRIntercambioEmbarque = listos[0];
+    cont.innerHTML =
+      '<p class="section-label">Intercambio</p>' +
+      '<div class="doc-btn" onclick="abrirQRIntercambio(tarjetaQRIntercambioEmbarque.id)">' +
+      '<span class="doc-btn-icon">🔑</span>' +
+      '<div class="doc-btn-text">' +
+      '<div class="doc-btn-title">Mostrar QR de intercambio</div>' +
+      '<div class="doc-btn-sub">' + docEsc(tarjetaQRIntercambioEmbarque.shipment || tarjetaQRIntercambioEmbarque.id) + ' — muéstralo al intercambista en el portón.</div>' +
+      '</div><span class="doc-btn-arrow">›</span></div>';
+    cont.classList.remove('hidden');
+  } catch (e) {
+    // No es crítico: si falla, simplemente no se muestra/actualiza la
+    // tarjeta — el botón de la pantalla de éxito del checkpoint (que no
+    // depende de esta consulta) sigue funcionando igual.
+    console.warn('No se pudo cargar la tarjeta de QR de intercambio:', e.message);
+  }
 }
