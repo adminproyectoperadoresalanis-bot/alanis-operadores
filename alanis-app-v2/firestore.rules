@@ -76,7 +76,8 @@ service cloud.firestore {
       let antes = resource.data;
       let despues = request.resource.data;
 
-      let yaValidado = antes.estatusValidacion == 'VALIDADO' || antes.estatusValidacion == 'DISCREPANCIA';
+      let estatusAntes = antes.get('estatusValidacion', null);
+      let yaValidado = estatusAntes == 'VALIDADO' || estatusAntes == 'DISCREPANCIA';
       let tieneOrigen = antes.uuidEsperado is string && antes.uuidEsperado.size() > 0
                       && antes.receptorRFCEsperado is string && antes.receptorRFCEsperado.size() > 0;
 
