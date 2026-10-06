@@ -372,7 +372,9 @@
 
     <div id="doc-modal-captura">
       <div id="doc-qr-reader"></div>
-      <p class="doc-modal-nota" id="doc-camara-estado" style="margin-top:8px">Apunta la cámara al código QR de la factura.</p>
+      <p class="doc-modal-nota" id="doc-camara-estado" style="margin-top:8px">Apunta la cámara al QR de la factura y acércala hasta que el QR ocupe buena parte de la pantalla. Si no lee, usa el botón de foto.</p>
+      <button type="button" class="btn-secondary" id="doc-foto-btn" style="width:100%;margin-top:10px" onclick="document.getElementById('doc-foto-input').click()">&#128247; &iquest;No lee? Toma o elige una foto del QR</button>
+      <input type="file" id="doc-foto-input" accept="image/*" class="hidden" onchange="docLeerFoto(this)"/>
     </div>
 
     <div id="doc-modal-confirmar" class="hidden">
@@ -479,6 +481,6 @@
 <script src="firebase-config.js"></script>
 <script src="js/data.js?v=5"></script>
 <script src="js/mostrar-qr-intercambio.js?v=1"></script>
-<script src="js/operador4.js?v=13"></script>
+<script src="js/operador4.js?v=14"></script>
 </body>
 </html>
