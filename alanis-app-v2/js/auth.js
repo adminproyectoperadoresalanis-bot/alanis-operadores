@@ -57,7 +57,7 @@ async function verificarAcceso(user) {
     const doc = await firebase.firestore().collection('usuarios').doc(user.uid).get();
     if (doc.exists && doc.data().activo === true) {
       const rol = doc.data().rol;
-      window.location.replace(['admin','superadmin','supervisor'].includes(rol) ? 'admin.html' : 'operador.html');
+      window.location.replace(['admin','superadmin','supervisor'].includes(rol) ? 'admin.html' : 'operador.html' + (function() { try { var c = new URLSearchParams(window.location.search).get('enlace') || localStorage.getItem('enlaceCheckpointPendiente'); return c ? '?enlace=' + encodeURIComponent(c) : ''; } catch (e) { return ''; } })());
       return;
     }
     // No existe en usuarios — guardar solicitud

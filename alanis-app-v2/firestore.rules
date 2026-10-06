@@ -209,5 +209,11 @@ service cloud.firestore {
     match /bitacoraValidacionesIntercambio/{id} {
       allow read, write: if false;
     }
+
+    // Enlaces de respaldo del Checkpoint 1: SOLO las Cloud Functions (Admin SDK)
+    // pueden leer o escribir. Ningun cliente.
+    match /enlaces_checkpoint/{id} {
+      allow read, write: if false;
+    }
   }
 }

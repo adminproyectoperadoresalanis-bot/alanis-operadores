@@ -118,8 +118,116 @@ let qrIdViaje = null;
 let toastTimer = null;
 let relojInterval = null;
 
+// ── Enlace de respaldo para el Checkpoint 1 ─────────────────────────────
+// Operaciones puede mandar por WhatsApp un enlace de un solo uso a un operador
+// que no logra escanear su factura. Al abrirlo (operador.html?enlace=CODIGO)
+// el operador inicia sesion, ve los datos del embarque, confirma, y el
+// servidor registra la recepcion. El codigo se guarda en memoria y en
+// localStorage (si el navegador lo permite) para sobrevivir al login, y se
+// borra de la barra de direcciones en cuanto se captura.
+var enlaceCheckpointCodigo = null;
+(function capturarEnlaceCheckpoint() {
+  try {
+    var p = new URLSearchParams(window.location.search);
+    var c = p.get('enlace');
+    if (c) {
+      enlaceCheckpointCodigo = c.trim();
+      try { localStorage.setItem('enlaceCheckpointPendiente', enlaceCheckpointCodigo); } catch (e) {}
+      p.delete('enlace');
+      var q = p.toString();
+      window.history.replaceState(null, '', window.location.pathname + (q ? '?' + q : '') + window.location.hash);
+    } else {
+      try { enlaceCheckpointCodigo = localStorage.getItem('enlaceCheckpointPendiente') || null; } catch (e) {}
+    }
+  } catch (e) {}
+})();
+
+function sufijoEnlacePendiente() {
+  return enlaceCheckpointCodigo ? '?enlace=' + encodeURIComponent(enlaceCheckpointCodigo) : '';
+}
+
+function limpiarEnlacePendiente() {
+  enlaceCheckpointCodigo = null;
+  try { localStorage.removeItem('enlaceCheckpointPendiente'); } catch (e) {}
+}
+
+function enlaceFn(nombre) {
+  return firebase.app().functions('us-central1').httpsCallable(nombre);
+}
+
+function enlaceMostrar(estado, datos, err) {
+  var overlay = document.getElementById('enlace-modal-overlay');
+  if (!overlay) return;
+  ['cargando', 'confirmar', 'ok', 'error'].forEach(function(s) {
+    document.getElementById('enlace-st-' + s).style.display = (s === estado) ? 'block' : 'none';
+  });
+  if (estado === 'confirmar') {
+    document.getElementById('enlace-d-shipment').textContent = datos.shipment || '—';
+    document.getElementById('enlace-d-cliente').textContent = datos.clienteNombre || '—';
+    document.getElementById('enlace-d-oc').textContent = datos.ocCliente || '—';
+    document.getElementById('enlace-d-caja').textContent = datos.caja || '—';
+    var b = document.getElementById('enlace-btn-confirmar');
+    b.disabled = false;
+    b.textContent = 'Confirmar recepción';
+  }
+  if (estado === 'ok') {
+    document.getElementById('enlace-ok-shipment').textContent = (datos && datos.shipment) ? 'Embarque ' + datos.shipment : '';
+  }
+  if (estado === 'error') {
+    document.getElementById('enlace-error-texto').textContent = datos;
+    var ajeno = !!(err && err.code === 'functions/permission-denied');
+    document.getElementById('enlace-btn-salir').style.display = ajeno ? 'block' : 'none';
+  }
+  overlay.style.display = 'flex';
+}
+
+function enlaceMensajeError(err) {
+  var code = err && err.code ? String(err.code) : '';
+  var utiles = ['functions/not-found', 'functions/permission-denied', 'functions/failed-precondition', 'functions/invalid-argument'];
+  if (utiles.indexOf(code) !== -1 && err.message) return err.message;
+  return 'No se pudo verificar el enlace. Revisa tu conexión a internet e inténtalo de nuevo.';
+}
+
+async function procesarEnlaceCheckpointPendiente() {
+  if (!enlaceCheckpointCodigo) return;
+  enlaceMostrar('cargando');
+  try {
+    var res = await enlaceFn('validarEnlaceCheckpoint')({ codigo: enlaceCheckpointCodigo });
+    enlaceMostrar('confirmar', res.data);
+  } catch (err) {
+    console.warn('Enlace:', err);
+    enlaceMostrar('error', enlaceMensajeError(err), err);
+  }
+}
+
+async function confirmarEnlaceCheckpoint() {
+  var btn = document.getElementById('enlace-btn-confirmar');
+  btn.disabled = true;
+  btn.textContent = 'Registrando…';
+  try {
+    var res = await enlaceFn('consumirEnlaceCheckpoint')({ codigo: enlaceCheckpointCodigo });
+    limpiarEnlacePendiente();
+    enlaceMostrar('ok', res.data);
+    try { cargarTarjetaQRIntercambio(); } catch (e) {}
+  } catch (err) {
+    console.warn('Enlace:', err);
+    enlaceMostrar('error', enlaceMensajeError(err), err);
+  }
+}
+
+function cerrarEnlaceCheckpoint() {
+  limpiarEnlacePendiente();
+  var overlay = document.getElementById('enlace-modal-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+// Cuenta equivocada: se conserva el codigo para usarlo despues de cambiar de cuenta.
+function salirYReintentarEnlace() {
+  doLogout();
+}
+
 firebase.auth().onAuthStateChanged(async user => {
-  if (!user) { window.location.href = 'index.html'; return; }
+  if (!user) { window.location.href = 'index.html' + sufijoEnlacePendiente(); return; }
   currentUser = user;
   const doc = await firebase.firestore().collection('usuarios').doc(user.uid).get();
   if (!doc.exists) { doLogout(); return; }
@@ -136,6 +244,7 @@ firebase.auth().onAuthStateChanged(async user => {
   cargarUltimoEstatus();
   cargarHistorial();
   cargarTarjetaQRIntercambio();
+  procesarEnlaceCheckpointPendiente();
   if (localStorage.getItem('darkMode') === '1') toggleDark();
 });
 

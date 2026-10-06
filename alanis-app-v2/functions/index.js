@@ -218,3 +218,5 @@ exports.sincronizarOperadoresAlanis = onDocumentWritten(
 // ============================================================================
 exports.generarTokenIntercambio = require("./generarTokenIntercambio").generarTokenIntercambio;
 exports.validarTokenIntercambio = require("./validarTokenIntercambio").validarTokenIntercambio;
+exports.validarEnlaceCheckpoint = require("./enlacesCheckpoint").validarEnlaceCheckpoint;
+exports.consumirEnlaceCheckpoint = require("./enlacesCheckpoint").consumirEnlaceCheckpoint;
