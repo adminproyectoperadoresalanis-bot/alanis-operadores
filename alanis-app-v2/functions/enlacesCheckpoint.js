@@ -169,6 +169,14 @@ function verificarEmbarque(enlace, embarque, uid) {
   }
 }
 
+// Quién generó el enlace. Interno lo guarda como `creadoPor` {uid, nombre, correo,
+// proyecto}; el contrato original lo llamaba `emitidoPor`. Se acepta cualquiera.
+function quienEmitio(enlace) {
+  const p = enlace.emitidoPor || enlace.creadoPor;
+  if (!p || typeof p !== "object") return null;
+  return { uid: p.uid || null, nombre: p.nombre || null, correo: p.correo || null };
+}
+
 // Ejecuta una función y, si se rechaza con un motivo, lo deja en el log y en el
 // registro del enlace (si existe). Nunca escribe el código en claro.
 async function conDiagnostico(funcion, request, fn) {
@@ -269,7 +277,7 @@ exports.consumirEnlaceCheckpoint = onCall(
           timestamp: admin.firestore.FieldValue.serverTimestamp(),
           metodo: "enlace",
           enlace: {
-            emitidoPor: enlace.emitidoPor || null,
+            emitidoPor: quienEmitio(enlace),
             emitidoEn: enlace.creadoEn || null,
           },
         },
