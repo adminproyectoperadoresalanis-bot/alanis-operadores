@@ -126,10 +126,12 @@ let relojInterval = null;
 // localStorage (si el navegador lo permite) para sobrevivir al login, y se
 // borra de la barra de direcciones en cuanto se captura.
 var enlaceCheckpointCodigo = null;
+var enlaceCheckpointFalta = false;
 (function capturarEnlaceCheckpoint() {
   try {
     var p = new URLSearchParams(window.location.search);
     var c = p.get('enlace');
+    if (p.has('enlace') && !(c && c.trim())) { enlaceCheckpointFalta = true; }
     if (c) {
       enlaceCheckpointCodigo = c.trim();
       try { localStorage.setItem('enlaceCheckpointPendiente', enlaceCheckpointCodigo); } catch (e) {}
@@ -155,7 +157,7 @@ function enlaceFn(nombre) {
   return firebase.app().functions('us-central1').httpsCallable(nombre);
 }
 
-function enlaceMostrar(estado, datos, err) {
+function enlaceMostrar(estado, datos, err, motivo) {
   var overlay = document.getElementById('enlace-modal-overlay');
   if (!overlay) return;
   ['cargando', 'confirmar', 'ok', 'error'].forEach(function(s) {
@@ -175,6 +177,9 @@ function enlaceMostrar(estado, datos, err) {
   }
   if (estado === 'error') {
     document.getElementById('enlace-error-texto').textContent = datos;
+    var mot = motivo || (err && err.details && err.details.motivo) || '';
+    var motEl = document.getElementById('enlace-error-motivo');
+    if (motEl) motEl.textContent = mot ? 'Motivo: ' + String(mot).replace(/_/g, ' ') : '';
     var ajeno = !!(err && err.code === 'functions/permission-denied');
     document.getElementById('enlace-btn-salir').style.display = ajeno ? 'block' : 'none';
   }
@@ -189,6 +194,12 @@ function enlaceMensajeError(err) {
 }
 
 async function procesarEnlaceCheckpointPendiente() {
+  if (enlaceCheckpointFalta) {
+    enlaceCheckpointFalta = false;
+    limpiarEnlacePendiente();
+    enlaceMostrar('error', 'El enlace llegó sin su código. Pide a Operaciones que te lo envíe de nuevo.', null, 'falta_codigo');
+    return;
+  }
   if (!enlaceCheckpointCodigo) return;
   enlaceMostrar('cargando');
   try {

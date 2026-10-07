@@ -5,12 +5,12 @@
 // ADREMATASA Interno) genera un enlace de un solo uso y se lo manda por
 // WhatsApp. El registro del enlace se guarda en la colección
 // `enlaces_checkpoint` de ESTE proyecto (alanis-operadores). El ID del
-// documento es el SHA-256 (hex, minúsculas) del código; el código en claro
-// NUNCA se guarda ni se escribe en logs.
+// documento es el SHA-256 (hex, minúsculas) del TEXTO del código; el código en
+// claro NUNCA se guarda ni se escribe en logs.
 //
 // Dos funciones (ambas exigen que el operador haya iniciado sesión):
-//   validarEnlaceCheckpoint  → SOLO LEE. Revisa el enlace y devuelve los datos
-//                              del embarque para que el operador los confirme.
+//   validarEnlaceCheckpoint  → revisa el enlace y devuelve los datos del
+//                              embarque para que el operador los confirme.
 //   consumirEnlaceCheckpoint → en una transacción vuelve a revisar todo y
 //                              escribe ÚNICAMENTE la llave `recepcionOperador`
 //                              del embarque; marca el enlace como usado.
@@ -21,10 +21,15 @@
 //   checkpoint   string     "recepcion"
 //   uuidEsperado string     UUID de la factura, congelado al generar
 //   creadoEn     Timestamp
-//   expiraEn     Timestamp
+//   expiraEn     Timestamp  (también se acepta el nombre `venceEn`)
 //   usado        boolean    false al crear
 //   revocado     boolean    false al crear
 //   emitidoPor   { uid, nombre }   quién de Operaciones lo generó
+//
+// DIAGNÓSTICO: cada rechazo se identifica con un `motivo` (ver MOTIVOS abajo).
+// El motivo viaja al celular en `error.details.motivo`, se escribe en el log y,
+// si el registro existe, queda guardado en el propio registro:
+//   ultimoRechazo { motivo, funcion, uid, en, faltantes? }  y  rechazos (contador)
 // ============================================================================
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const admin = require("firebase-admin");
@@ -38,133 +43,218 @@ const COL_REPO = "repositorio_mccain";
 const COL_ENLACES = "enlaces_checkpoint";
 const COL_USUARIOS = "usuarios";
 const CODIGO_RE = /^[A-Za-z0-9_-]{20,128}$/;
+const ZONA_HORARIA = "America/Matamoros"; // Nuevo Laredo
 
 function hashCodigo(codigo) {
   return crypto.createHash("sha256").update(codigo, "utf8").digest("hex");
 }
 
-function leerCodigo(request) {
-  if (!request.auth) {
-    throw new HttpsError("unauthenticated", "Debes iniciar sesión.");
-  }
-  const codigo = request.data && request.data.codigo;
-  if (typeof codigo !== "string" || !CODIGO_RE.test(codigo)) {
-    throw new HttpsError("not-found", "Este enlace no es válido.");
-  }
-  return codigo;
+// Error con motivo identificable. `interno` NO viaja al cliente (solo log/registro).
+function fallo(code, motivo, mensaje, interno) {
+  const e = new HttpsError(code, mensaje, { motivo });
+  e.interno = interno || null;
+  return e;
 }
 
 function aMillis(t) {
   return t && typeof t.toMillis === "function" ? t.toMillis() : null;
 }
 
-// Revisa enlace + embarque. Lanza HttpsError con un mensaje que el operador
-// pueda entender. Se usa igual en validar (lectura) y en consumir (transacción).
-function verificarEnlace(enlace, embarque, uid) {
+function vigencia(enlace) {
+  return enlace.expiraEn !== undefined && enlace.expiraEn !== null
+    ? enlace.expiraEn
+    : enlace.venceEn;
+}
+
+function formatoFecha(ms) {
+  try {
+    return new Date(ms).toLocaleString("es-MX", {
+      timeZone: ZONA_HORARIA, day: "2-digit", month: "2-digit",
+      hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+  } catch (e) {
+    return new Date(ms).toISOString();
+  }
+}
+
+function leerCodigo(request) {
+  if (!request.auth) {
+    throw fallo("unauthenticated", "sin_sesion", "Debes iniciar sesión.");
+  }
+  const codigo = request.data && request.data.codigo;
+  if (typeof codigo !== "string" || codigo.trim() === "") {
+    throw fallo("invalid-argument", "falta_codigo",
+      "Al enlace le falta su código. Pide a Operaciones que te lo envíe de nuevo.");
+  }
+  if (!CODIGO_RE.test(codigo)) {
+    throw fallo("invalid-argument", "codigo_invalido",
+      "El enlace está incompleto o dañado (a veces WhatsApp lo corta). Pide a Operaciones que te lo envíe de nuevo.");
+  }
+  return codigo;
+}
+
+// Campos que el registro DEBE traer. Si Interno escribe un nombre distinto,
+// aquí queda a la vista en vez de confundirse con "vencido" o "ajeno".
+function camposFaltantes(enlace) {
+  const f = [];
+  const idOk = typeof enlace.embarqueId === "string" && enlace.embarqueId && enlace.embarqueId.indexOf("/") === -1;
+  if (!idOk) f.push("embarqueId");
+  if (typeof enlace.operadorUid !== "string" || !enlace.operadorUid) f.push("operadorUid");
+  if (typeof enlace.uuidEsperado !== "string" || !enlace.uuidEsperado) f.push("uuidEsperado");
+  if (aMillis(vigencia(enlace)) === null) f.push("expiraEn (Timestamp)");
+  return f;
+}
+
+// Revisa el registro del enlace (sin mirar todavía el embarque).
+function verificarRegistro(enlace, uid) {
   if (!enlace) {
-    throw new HttpsError("not-found", "Este enlace no es válido.");
+    throw fallo("not-found", "no_existe",
+      "Este enlace no existe o ya fue reemplazado. Pide uno nuevo a Operaciones.");
+  }
+  const faltantes = camposFaltantes(enlace);
+  if (faltantes.length) {
+    throw fallo("failed-precondition", "registro_incompleto",
+      "Este enlace se generó incompleto. Avisa a Operaciones para que genere uno nuevo.",
+      { faltantes });
   }
   if (enlace.checkpoint && enlace.checkpoint !== "recepcion") {
-    throw new HttpsError("not-found", "Este enlace no es válido.");
+    throw fallo("failed-precondition", "checkpoint_distinto",
+      "Este enlace no es para la recepción del documento. Pide uno nuevo a Operaciones.");
   }
   if (enlace.revocado === true) {
-    throw new HttpsError("failed-precondition",
-      "Este enlace fue cancelado. Pide uno nuevo a Operaciones.");
+    throw fallo("failed-precondition", "revocado",
+      "Este enlace fue cancelado porque Operaciones generó uno más reciente. Usa el último que te enviaron o pide uno nuevo.");
   }
   if (enlace.usado === true) {
-    throw new HttpsError("failed-precondition",
+    throw fallo("failed-precondition", "usado",
       "Este enlace ya fue utilizado. Si tu recepción ya aparece registrada, no necesitas hacer nada más.");
   }
-  const exp = aMillis(enlace.expiraEn);
-  if (!exp || exp <= Date.now()) {
-    throw new HttpsError("failed-precondition",
-      "Este enlace venció. Pide uno nuevo a Operaciones.");
+  const exp = aMillis(vigencia(enlace));
+  if (exp <= Date.now()) {
+    throw fallo("failed-precondition", "vencido",
+      "Este enlace venció el " + formatoFecha(exp) + " (hora de Nuevo Laredo). Pide uno nuevo a Operaciones.");
   }
   if (enlace.operadorUid !== uid) {
-    throw new HttpsError("permission-denied",
+    throw fallo("permission-denied", "otro_operador",
       "Este enlace es para otro operador. Cierra sesión e ingresa con tu propia cuenta.");
   }
+}
+
+// Revisa el embarque contra el enlace.
+function verificarEmbarque(enlace, embarque, uid) {
   if (!embarque) {
-    throw new HttpsError("not-found", "El embarque de este enlace ya no existe.");
+    throw fallo("not-found", "embarque_no_existe",
+      "El embarque de este enlace ya no existe. Avisa a Operaciones.");
   }
   const uidAsignado = embarque.operadorAsignado && embarque.operadorAsignado.uid;
   if (uidAsignado !== uid) {
-    throw new HttpsError("permission-denied",
+    throw fallo("permission-denied", "embarque_reasignado",
       "Este embarque ya no está asignado a tu cuenta. Avisa a Operaciones.");
   }
   if (embarque.recepcionOperador) {
     if (embarque.recepcionOperador.resultado === "COINCIDE") {
-      throw new HttpsError("failed-precondition",
+      throw fallo("failed-precondition", "recepcion_ya_registrada",
         "La recepción de este embarque ya fue registrada. No necesitas hacer nada más.");
     }
-    throw new HttpsError("failed-precondition",
+    throw fallo("failed-precondition", "recepcion_con_diferencias",
       "Este embarque ya tiene un registro de recepción con diferencias. Avisa a Operaciones.");
   }
   if (!embarque.uuidEsperado || !embarque.receptorRFCEsperado) {
-    throw new HttpsError("failed-precondition",
+    throw fallo("failed-precondition", "sin_factura_esperada",
       "Este embarque todavía no tiene su factura esperada. Avisa a Operaciones.");
   }
   if (enlace.uuidEsperado !== embarque.uuidEsperado) {
-    throw new HttpsError("failed-precondition",
+    throw fallo("failed-precondition", "factura_cambio",
       "La factura del embarque cambió después de generar el enlace. Pide uno nuevo a Operaciones.");
   }
 }
 
-function idEmbarque(enlace) {
-  const id = enlace && enlace.embarqueId;
-  if (typeof id !== "string" || !id || id.indexOf("/") !== -1) {
-    throw new HttpsError("not-found", "Este enlace no es válido.");
+// Ejecuta una función y, si se rechaza con un motivo, lo deja en el log y en el
+// registro del enlace (si existe). Nunca escribe el código en claro.
+async function conDiagnostico(funcion, request, fn) {
+  const ctx = { funcion, uid: request.auth ? request.auth.uid : null, ref: null, existe: false, huella: null };
+  try {
+    return await fn(ctx);
+  } catch (err) {
+    const motivo = err && err.details && err.details.motivo;
+    if (motivo) {
+      const faltantes = err.interno && err.interno.faltantes;
+      logger.warn("Enlace rechazado", {
+        funcion, motivo, uid: ctx.uid, huella: ctx.huella, faltantes: faltantes || null,
+      });
+      if (ctx.ref && ctx.existe) {
+        try {
+          const rechazo = { motivo, funcion, uid: ctx.uid, en: admin.firestore.FieldValue.serverTimestamp() };
+          if (faltantes) rechazo.faltantes = faltantes;
+          await ctx.ref.update({
+            ultimoRechazo: rechazo,
+            rechazos: admin.firestore.FieldValue.increment(1),
+          });
+        } catch (e) {
+          logger.error("No se pudo guardar el motivo del rechazo", { motivo, error: String(e && e.message) });
+        }
+      }
+    } else {
+      logger.error("Error inesperado en enlace", { funcion, uid: ctx.uid, error: String(err && err.message) });
+    }
+    throw err;
   }
-  return id;
 }
 
 exports.validarEnlaceCheckpoint = onCall(
   { region: "us-central1" },
-  async (request) => {
+  (request) => conDiagnostico("validar", request, async (ctx) => {
     const codigo = leerCodigo(request);
     const uid = request.auth.uid;
+    const id = hashCodigo(codigo);
+    ctx.huella = id.slice(0, 8);
+    ctx.ref = db.collection(COL_ENLACES).doc(id);
 
-    const enlaceSnap = await db.collection(COL_ENLACES).doc(hashCodigo(codigo)).get();
+    const enlaceSnap = await ctx.ref.get();
+    ctx.existe = enlaceSnap.exists;
     const enlace = enlaceSnap.exists ? enlaceSnap.data() : null;
-    if (!enlace) throw new HttpsError("not-found", "Este enlace no es válido.");
+    verificarRegistro(enlace, uid);
 
-    const embSnap = await db.collection(COL_REPO).doc(idEmbarque(enlace)).get();
+    const embSnap = await db.collection(COL_REPO).doc(enlace.embarqueId).get();
     const embarque = embSnap.exists ? embSnap.data() : null;
-
-    verificarEnlace(enlace, embarque, uid);
+    verificarEmbarque(enlace, embarque, uid);
 
     return {
       shipment: embarque.shipment || "",
       clienteNombre: embarque.clienteNombre || "",
       ocCliente: embarque.ocCliente || "",
       caja: embarque.caja || "",
-      expiraEnMs: aMillis(enlace.expiraEn),
+      expiraEnMs: aMillis(vigencia(enlace)),
     };
-  }
+  })
 );
 
 exports.consumirEnlaceCheckpoint = onCall(
   { region: "us-central1" },
-  async (request) => {
+  (request) => conDiagnostico("consumir", request, async (ctx) => {
     const codigo = leerCodigo(request);
     const uid = request.auth.uid;
-    const enlaceRef = db.collection(COL_ENLACES).doc(hashCodigo(codigo));
+    const id = hashCodigo(codigo);
+    ctx.huella = id.slice(0, 8);
+    ctx.ref = db.collection(COL_ENLACES).doc(id);
+    const enlaceRef = ctx.ref;
 
     const resultado = await db.runTransaction(async (tx) => {
       const enlaceSnap = await tx.get(enlaceRef);
+      ctx.existe = enlaceSnap.exists;
       const enlace = enlaceSnap.exists ? enlaceSnap.data() : null;
-      if (!enlace) throw new HttpsError("not-found", "Este enlace no es válido.");
+      verificarRegistro(enlace, uid);
 
-      const embarqueRef = db.collection(COL_REPO).doc(idEmbarque(enlace));
+      const embarqueRef = db.collection(COL_REPO).doc(enlace.embarqueId);
       const embSnap = await tx.get(embarqueRef);
       const embarque = embSnap.exists ? embSnap.data() : null;
       const userSnap = await tx.get(db.collection(COL_USUARIOS).doc(uid));
       const usuario = userSnap.exists ? userSnap.data() : null;
 
-      verificarEnlace(enlace, embarque, uid);
+      verificarEmbarque(enlace, embarque, uid);
 
       if (!usuario || usuario.activo === false) {
-        throw new HttpsError("permission-denied", "Tu cuenta no está activa.");
+        throw fallo("permission-denied", "cuenta_inactiva", "Tu cuenta no está activa.");
       }
       const nombre = usuario.nombreOficial || usuario.nombre || "";
 
@@ -193,10 +283,7 @@ exports.consumirEnlaceCheckpoint = onCall(
     });
 
     // Sin el código: solo el embarque y quién lo usó.
-    logger.info("Checkpoint 1 registrado por enlace", {
-      embarqueId: resultado.embarqueId,
-      uid,
-    });
+    logger.info("Checkpoint 1 registrado por enlace", { embarqueId: resultado.embarqueId, uid });
     return { ok: true, shipment: resultado.shipment };
-  }
+  })
 );
