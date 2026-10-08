@@ -926,7 +926,7 @@ async function abrirEscaneoDocumentacion(checkpoint) {
   // evitar el toque accidental — no reemplaza ninguna validación de
   // Firestore.
   if (checkpoint === 'pre_entrega' && !checkpoint2Habilitado) {
-    showToast('Primero completa el Checkpoint 1 de tu embarque asignado.', true);
+    mostrarBloqueoCheckpoint2();
     return;
   }
   docCheckpointActual = checkpoint;
@@ -1614,6 +1614,18 @@ let tarjetaQRIntercambioEmbarque = null;
 // "Excepción" en embarques sin factura — ambos quedaron fuera de alcance
 // por ahora, a propósito.
 let checkpoint2Habilitado = false;
+// Si la pre-entrega ya quedo registrada (por el operador o por Operaciones), se guarda aqui
+let checkpoint2YaRegistrado = null;
+function mostrarBloqueoCheckpoint2() {
+  if (checkpoint2YaRegistrado) {
+    var msg = checkpoint2YaRegistrado.remoto
+      ? 'La pre-entrega de este embarque ya fue registrada (validada por Operaciones).'
+      : 'La pre-entrega de este embarque ya fue registrada.';
+    showToast(msg, false);
+    return;
+  }
+  showToast('Primero completa el Checkpoint 1 de tu embarque asignado.', true);
+}
 
 function actualizarDisponibilidadCheckpoint2(habilitado) {
   checkpoint2Habilitado = habilitado;
@@ -1638,6 +1650,17 @@ async function cargarTarjetaQRIntercambio() {
         && e.estatusValidacion !== 'VALIDADO' && e.estatusValidacion !== 'DISCREPANCIA';
     });
     actualizarDisponibilidadCheckpoint2(listos.length > 0);
+      checkpoint2YaRegistrado = null;
+      if (listos.length === 0) {
+        const yaRegistrados = asignados.filter(function(e) {
+          return e.recepcionOperador && e.recepcionOperador.resultado === 'COINCIDE'
+            && (e.estatusValidacion === 'VALIDADO' || e.estatusValidacion === 'DISCREPANCIA');
+        });
+        if (yaRegistrados.length > 0) {
+          const d = yaRegistrados[0].destinoEscaneo;
+          checkpoint2YaRegistrado = { remoto: !!(d && d.metodo === 'remoto_operaciones') };
+        }
+      }
 
     const cont = document.getElementById('doc-qr-intercambio-tarjeta');
     if (!cont) return;

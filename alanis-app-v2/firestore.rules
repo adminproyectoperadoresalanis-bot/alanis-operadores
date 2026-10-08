@@ -215,5 +215,8 @@ service cloud.firestore {
     match /enlaces_checkpoint/{id} {
       allow read, write: if false;
     }
+
+    // Bitacora de validaciones hechas por Operaciones: solo escribe el servidor (Admin SDK)
+    match /bitacora_validaciones_remotas/{id} { allow read, write: if false; }
   }
 }
