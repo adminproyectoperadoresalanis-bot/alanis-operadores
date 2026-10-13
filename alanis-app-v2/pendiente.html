@@ -30,35 +30,97 @@
     .btn-logout { width:100%; padding:12px; background:transparent; color:var(--text-muted); border:0.5px solid var(--border-strong); border-radius:10px; font-size:14px; cursor:pointer; }
     .btn-logout:hover { background:var(--brand-pale); }
     .footer { margin-top:20px; font-size:11px; color:var(--text-muted); }
+
+    /* Formulario de unidad + celular (2026-10-13) */
+    .oculto { display:none !important; }
+    .reg-form { text-align:left; margin-bottom:16px; }
+    .reg-form label { display:block; font-size:12px; color:var(--text-muted); margin:12px 0 5px; }
+    .reg-form input, .reg-form select { width:100%; box-sizing:border-box; font-size:15px; padding:11px 12px; border:0.5px solid var(--border-strong); border-radius:10px; background:var(--bg-app); color:var(--text-primary); }
+    .reg-tel { display:flex; gap:6px; }
+    .reg-tel select { width:96px; flex-shrink:0; }
+    .reg-tel input { flex:1; min-width:0; }
+    .btn-enviar { width:100%; padding:13px; margin-top:18px; background:#2C1E0F; color:#fff; border:none; border-radius:10px; font-size:15px; font-weight:600; cursor:pointer; }
+    .btn-enviar:disabled { opacity:0.6; cursor:default; }
+    .reg-error { background:#FCEBEB; color:#791F1F; border:0.5px solid #E24B4A; border-radius:10px; padding:10px 12px; font-size:13px; margin-top:12px; text-align:left; }
+    .link-corregir { background:none; border:none; padding:0; margin:-12px 0 18px; font-size:13px; color:var(--text-muted); text-decoration:underline; cursor:pointer; }
+    .btn-cancelar { width:100%; padding:11px; margin-top:8px; background:transparent; color:var(--text-muted); border:0.5px solid var(--border-strong); border-radius:10px; font-size:14px; cursor:pointer; }
   </style>
 </head>
 <body>
 <div class="pending-card">
   <div class="logo-wrap"><img src="img/logo.webp" alt="Logo Autotransportes Alanís"/></div>
-  <div class="status-icon">
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+
+  <!-- Cargando (mientras se lee la solicitud) -->
+  <div id="vista-cargando">
+    <p class="pending-sub">Cargando tu solicitud...</p>
   </div>
-  <h1 class="pending-title">Solicitud enviada</h1>
-  <p class="pending-sub">Tu solicitud de acceso fue recibida.<br/>Un <strong>administrador</strong> la revisará y te dará acceso en breve.</p>
-  <div class="waiting-dots"><div class="dot-pulse"></div><div class="dot-pulse"></div><div class="dot-pulse"></div></div>
-  <div class="info-box">
-    <div class="info-row">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-      <span class="info-label">Nombre</span><span class="info-value" id="user-name">—</span>
+
+  <!-- Formulario obligatorio: unidad + celular (2026-10-13) -->
+  <div id="vista-formulario" class="oculto">
+    <h1 class="pending-title" id="form-titulo">Completa tu registro</h1>
+    <p class="pending-sub" id="form-sub">Para que un administrador pueda darte acceso, captura tu número de unidad y tu celular.</p>
+    <div class="info-box" style="margin-bottom:8px">
+      <div class="info-row">
+        <span class="info-label">Nombre</span><span class="info-value" id="form-nombre">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">Correo</span><span class="info-value" id="form-correo" style="font-size:11px">—</span>
+      </div>
     </div>
-    <div class="info-row">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-      <span class="info-label">Correo</span><span class="info-value" id="user-email" style="font-size:11px">—</span>
-    </div>
-    <div class="info-row">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-      <span class="info-label">Fecha solicitud</span><span class="info-value" id="fecha-solicitud">—</span>
-    </div>
-    <div class="info-row">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      <span class="info-label">Estado</span><span class="info-value" style="color:#BA7517">🟡 Pendiente aprobación</span>
-    </div>
+    <form class="reg-form" id="reg-form" novalidate>
+      <label for="reg-unidad">Número de unidad *</label>
+      <input type="text" id="reg-unidad" inputmode="numeric" maxlength="10" placeholder="Ej: 1121" autocomplete="off"/>
+      <label for="reg-telefono">Celular *</label>
+      <div class="reg-tel">
+        <select id="reg-lada">
+          <option value="52">MX +52</option>
+          <option value="1">US +1</option>
+        </select>
+        <input type="tel" id="reg-telefono" inputmode="numeric" maxlength="14" placeholder="10 dígitos" autocomplete="tel-national"/>
+      </div>
+      <div class="reg-error oculto" id="reg-error"></div>
+      <button type="submit" class="btn-enviar" id="btn-enviar">Enviar solicitud</button>
+      <button type="button" class="btn-cancelar oculto" id="btn-cancelar-correccion">Cancelar</button>
+    </form>
   </div>
+
+  <!-- Espera (la pantalla de siempre, ahora con unidad y celular) -->
+  <div id="vista-espera" class="oculto">
+    <div class="status-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+    </div>
+    <h1 class="pending-title">Solicitud enviada</h1>
+    <p class="pending-sub">Tu solicitud de acceso fue recibida.<br/>Un <strong>administrador</strong> la revisará y te dará acceso en breve.</p>
+    <div class="waiting-dots"><div class="dot-pulse"></div><div class="dot-pulse"></div><div class="dot-pulse"></div></div>
+    <div class="info-box">
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span class="info-label">Nombre</span><span class="info-value" id="user-name">—</span>
+      </div>
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        <span class="info-label">Correo</span><span class="info-value" id="user-email" style="font-size:11px">—</span>
+      </div>
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="6" width="14" height="10" rx="1"/><path d="M15 9h4l3 3v4h-7"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+        <span class="info-label">Unidad</span><span class="info-value" id="user-unidad">—</span>
+      </div>
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="11" y1="18" x2="13" y2="18"/></svg>
+        <span class="info-label">Celular</span><span class="info-value" id="user-telefono">—</span>
+      </div>
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        <span class="info-label">Fecha solicitud</span><span class="info-value" id="fecha-solicitud">—</span>
+      </div>
+      <div class="info-row">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span class="info-label">Estado</span><span class="info-value" id="user-estado" style="color:#BA7517">🟡 Pendiente aprobación</span>
+      </div>
+    </div>
+    <button type="button" class="link-corregir oculto" id="btn-corregir">¿Te equivocaste? Corregir datos</button>
+  </div>
+
   <button class="btn-logout" onclick="doLogout()">Cerrar sesión y salir</button>
 </div>
 <div class="footer">© 2025 Autotransportes Alanís</div>
@@ -67,12 +129,152 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
 <script>
-firebase.auth().onAuthStateChanged(user => {
-  if (!user) { window.location.href = 'index.html'; return; }
-  document.getElementById('user-name').textContent = user.displayName || '—';
-  document.getElementById('user-email').textContent = user.email || '—';
-  document.getElementById('fecha-solicitud').textContent = new Date().toLocaleDateString('es-MX',{day:'numeric',month:'long',year:'numeric'});
+// Pantalla de solicitud pendiente.
+// 2026-10-13 (pedido de Ivan): al inscribirse, el operador captura de forma
+// OBLIGATORIA su número de unidad y su celular. Se guardan en su propia
+// solicitud (solicitudes/{uid}: unidad, lada, telefono); al aprobar, el
+// panel admin los trae prellenados (unidad → usuarios.numero, que es el
+// "número económico" de siempre). Mientras la solicitud siga pendiente, el
+// operador puede corregirlos ("Corregir datos"). Las reglas de Firestore solo
+// le permiten escribir esos 3 campos, solo en su propia solicitud y solo
+// mientras esté pendiente.
+
+let usuarioActual = null;
+let solicitudActual = null;
+
+function el(id) { return document.getElementById(id); }
+
+function mostrar(vista) {
+  ['vista-cargando', 'vista-formulario', 'vista-espera'].forEach(function(v) {
+    el(v).classList.toggle('oculto', v !== vista);
+  });
+}
+
+function datosCompletos(s) {
+  return !!s && typeof s.unidad === 'string' && s.unidad.trim() !== ''
+    && typeof s.telefono === 'string' && /^[0-9]{10}$/.test(s.telefono);
+}
+
+function formatearTelefono(lada, tel) {
+  if (!tel) return '—';
+  const t = String(tel);
+  return '+' + (lada || '52') + ' ' + t.slice(0, 3) + ' ' + t.slice(3, 6) + ' ' + t.slice(6);
+}
+
+function fechaSolicitud(s) {
+  const ts = s && s.timestamp && typeof s.timestamp.toDate === 'function' ? s.timestamp.toDate() : new Date();
+  return ts.toLocaleDateString('es-MX', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function mostrarErrorForm(msg) {
+  el('reg-error').textContent = msg;
+  el('reg-error').classList.remove('oculto');
+}
+
+function pintarEspera() {
+  const s = solicitudActual || {};
+  el('user-name').textContent = s.nombre || (usuarioActual && usuarioActual.displayName) || '—';
+  el('user-email').textContent = s.correo || (usuarioActual && usuarioActual.email) || '—';
+  el('user-unidad').textContent = s.unidad || '—';
+  el('user-telefono').textContent = formatearTelefono(s.lada, s.telefono);
+  el('fecha-solicitud').textContent = fechaSolicitud(s);
+  const pendiente = !s.estado || s.estado === 'pendiente';
+  if (s.estado === 'rechazado') {
+    el('user-estado').textContent = 'Solicitud rechazada';
+    el('user-estado').style.color = '#A32D2D';
+  }
+  // Solo se puede corregir mientras siga pendiente (igual que en las reglas).
+  el('btn-corregir').classList.toggle('oculto', !pendiente);
+  mostrar('vista-espera');
+}
+
+function pintarFormulario(esCorreccion) {
+  const s = solicitudActual || {};
+  el('form-nombre').textContent = s.nombre || (usuarioActual && usuarioActual.displayName) || '—';
+  el('form-correo').textContent = s.correo || (usuarioActual && usuarioActual.email) || '—';
+  el('reg-unidad').value = s.unidad || '';
+  el('reg-lada').value = s.lada === '1' ? '1' : '52';
+  el('reg-telefono').value = s.telefono || '';
+  el('reg-error').classList.add('oculto');
+  el('form-titulo').textContent = esCorreccion ? 'Corregir datos' : 'Completa tu registro';
+  el('form-sub').textContent = esCorreccion
+    ? 'Corrige tu número de unidad o tu celular. Tu solicitud sigue pendiente.'
+    : 'Para que un administrador pueda darte acceso, captura tu número de unidad y tu celular.';
+  el('btn-enviar').textContent = esCorreccion ? 'Guardar cambios' : 'Enviar solicitud';
+  el('btn-cancelar-correccion').classList.toggle('oculto', !esCorreccion);
+  mostrar('vista-formulario');
+}
+
+async function cargarSolicitud(user) {
+  const ref = firebase.firestore().collection('solicitudes').doc(user.uid);
+  const snap = await ref.get();
+  solicitudActual = snap.exists ? snap.data() : null;
+  const pendiente = !solicitudActual || !solicitudActual.estado || solicitudActual.estado === 'pendiente';
+  if (pendiente && !datosCompletos(solicitudActual)) {
+    pintarFormulario(false);
+  } else {
+    pintarEspera();
+  }
+}
+
+el('reg-form').addEventListener('submit', async function(e) {
+  e.preventDefault();
+  el('reg-error').classList.add('oculto');
+  const unidad = el('reg-unidad').value.trim();
+  const lada = el('reg-lada').value === '1' ? '1' : '52';
+  const telefono = el('reg-telefono').value.replace(/\D/g, '');
+  if (!unidad) { mostrarErrorForm('Captura tu número de unidad.'); return; }
+  if (unidad.length > 10) { mostrarErrorForm('El número de unidad es demasiado largo.'); return; }
+  if (telefono.length !== 10) { mostrarErrorForm('El celular debe tener 10 dígitos.'); return; }
+
+  const btn = el('btn-enviar');
+  btn.disabled = true;
+  try {
+    const ref = firebase.firestore().collection('solicitudes').doc(usuarioActual.uid);
+    if (solicitudActual) {
+      // Ya existe la solicitud: solo se tocan estos 3 campos (es lo único que
+      // las reglas le permiten al operador).
+      await ref.update({ unidad: unidad, lada: lada, telefono: telefono });
+    } else {
+      // Respaldo: si por alguna razón no se creó la solicitud al entrar
+      // (auth.js), se crea aquí completa, igual que guardarSolicitud().
+      await ref.set({
+        uid: usuarioActual.uid,
+        nombre: usuarioActual.displayName || '',
+        correo: usuarioActual.email || '',
+        estado: 'pendiente',
+        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
+        unidad: unidad, lada: lada, telefono: telefono,
+      });
+    }
+    await cargarSolicitud(usuarioActual);
+  } catch (err) {
+    console.error('Error guardando unidad/celular:', err.code, err.message);
+    mostrarErrorForm(err.code === 'permission-denied'
+      ? 'Tu solicitud ya no está pendiente, así que ya no se puede modificar. Contacta a tu supervisor.'
+      : 'No se pudo guardar. Revisa tu conexión e intenta de nuevo.');
+  } finally {
+    btn.disabled = false;
+  }
 });
+
+el('btn-corregir').addEventListener('click', function() { pintarFormulario(true); });
+el('btn-cancelar-correccion').addEventListener('click', function() { pintarEspera(); });
+
+firebase.auth().onAuthStateChanged(async function(user) {
+  if (!user) { window.location.href = 'index.html'; return; }
+  usuarioActual = user;
+  try {
+    await cargarSolicitud(user);
+  } catch (err) {
+    console.error('Error leyendo la solicitud:', err.code, err.message);
+    // Si no se pudo leer, se muestra el formulario: es lo que hace falta
+    // para que el admin pueda aprobarlo.
+    solicitudActual = null;
+    pintarFormulario(false);
+  }
+});
+
 function doLogout() { firebase.auth().signOut().then(() => window.location.href = 'index.html'); }
 </script>
 </body>

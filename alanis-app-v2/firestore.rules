@@ -31,6 +31,22 @@ service cloud.firestore {
       allow create: if request.auth.uid == uid;
       allow read:   if request.auth.uid == uid || isAdmin();
       allow update: if isAdmin();
+      // 2026-10-13 (pedido de Ivan): al inscribirse, el operador captura su
+      // número de unidad y su celular (obligatorios, ver pendiente.html), y
+      // puede corregirlos mientras su solicitud siga pendiente. Solo puede
+      // tocar ESTOS 3 campos de SU propia solicitud — nunca el estado, nombre,
+      // correo ni nada más.
+      allow update: if request.auth != null
+                    && request.auth.uid == uid
+                    && resource.data.get('estado', 'pendiente') == 'pendiente'
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['unidad', 'lada', 'telefono'])
+                    && request.resource.data.unidad is string
+                    && request.resource.data.unidad.size() > 0
+                    && request.resource.data.unidad.size() <= 10
+                    && request.resource.data.lada in ['52', '1']
+                    && request.resource.data.telefono is string
+                    && request.resource.data.telefono.matches('^[0-9]{10}$');
     }
     match /reportes/{id} {
       allow create: if request.auth != null
@@ -98,6 +114,12 @@ service cloud.firestore {
       return !yaValidado
         && tieneOrigen
         && despues.destinoEscaneo.escaneadoPor.uid == request.auth.uid
+        // PARCHE-2026-10-08: solo el operador asignado puede registrar la pre-entrega (camino normal y excepcion)
+        && antes.get('operadorAsignado', null) != null
+        && antes.operadorAsignado.uid == request.auth.uid
+        // PARCHE-2026-10-08: el Checkpoint 2 exige el Checkpoint 1 registrado y correcto
+        && antes.get('recepcionOperador', null) != null
+        && antes.recepcionOperador.get('resultado', null) == 'COINCIDE'
         && despues.destinoEscaneo.timestamp == request.time
         && despues.validadoPor == request.auth.uid
         && despues.uuidEsperado == antes.uuidEsperado

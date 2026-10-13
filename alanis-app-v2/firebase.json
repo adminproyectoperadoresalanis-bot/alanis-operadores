@@ -4,7 +4,17 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**"
+      "**/node_modules/**",
+      "functions/**",
+      "firestore.rules",
+      "firestore.indexes.json",
+      "**/*.sh",
+      "**/*.py",
+      "**/*.md",
+      "serviceAccountKey.json",
+      "**/*.patch",
+      "package.json",
+      "package-lock.json"
     ],
     "headers": [
       {

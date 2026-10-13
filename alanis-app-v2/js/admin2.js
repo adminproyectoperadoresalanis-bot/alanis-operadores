@@ -340,6 +340,8 @@ function renderSolicitudes(lista) {
       '<div style="flex:1;min-width:0">' +
       '<div class="op-name">' + escAttrAdmin(s.nombre || 'Sin nombre') + '</div>' +
       '<div class="op-sub">' + escAttrAdmin(s.correo || '—') + '</div>' +
+      // 2026-10-13: unidad capturada por el operador al inscribirse (pendiente.html)
+      (s.unidad ? '<div class="op-sub">Unidad ' + escAttrAdmin(s.unidad) + '</div>' : '<div class="op-sub" style="color:#BA7517">Sin unidad capturada</div>') +
       '</div>' +
       '<div style="font-size:11.5px;color:var(--text-muted);text-align:right;white-space:nowrap">' + fecha + '</div>' +
       '<div style="color:var(--text-muted);font-size:18px;flex-shrink:0">›</div>' +
@@ -357,10 +359,12 @@ function abrirSolicitud(uid) {
   document.getElementById('modal-sol-nombre').textContent = s.nombre || 'Sin nombre';
   document.getElementById('modal-sol-correo').textContent = s.correo || '—';
   document.getElementById('modal-sol-fecha').textContent  = 'Solicitó el ' + fecha;
-  document.getElementById('modal-sol-economico').value     = '';
+  // 2026-10-13: unidad y celular vienen prellenados con lo que el operador
+  // capturó al inscribirse (pendiente.html). El admin puede corregirlos.
+  document.getElementById('modal-sol-economico').value     = s.unidad || '';
   document.getElementById('modal-sol-nombreoficial').value = '';
-  document.getElementById('modal-sol-lada').value          = '52';
-  document.getElementById('modal-sol-telefono').value      = '';
+  document.getElementById('modal-sol-lada').value          = s.lada === '1' ? '1' : '52';
+  document.getElementById('modal-sol-telefono').value      = s.telefono || '';
 
   const botones = document.getElementById('modal-sol-botones');
   botones.innerHTML =
@@ -397,6 +401,26 @@ async function aprobarSolicitud(uid, rol) {
   if (telefono !== '' && telefono.length !== 10) {
     showToast('El teléfono debe tener 10 dígitos', true);
     return;
+  }
+
+  // 2026-10-13 (pedido de Ivan): misma validación que guardarDatosOperador —
+  // una unidad no puede quedar asignada a dos operadores activos.
+  if (numero !== '') {
+    try {
+      const dup = await firebase.firestore().collection('usuarios')
+        .where('numero', '==', numero)
+        .where('activo', '==', true)
+        .get();
+      const otro = dup.docs.find(function(d) { return d.id !== uid; });
+      if (otro) {
+        showToast('Unidad ' + numero + ' ya está asignada a ' + (otro.data().nombreOficial || otro.data().nombre || otro.id) + '. Corrige el número económico antes de aprobar.', true);
+        return;
+      }
+    } catch(e) {
+      console.error('Error validando unidad duplicada:', e);
+      showToast('No se pudo validar la unidad. Intenta de nuevo.', true);
+      return;
+    }
   }
 
   try {
