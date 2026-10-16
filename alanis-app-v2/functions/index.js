@@ -220,3 +220,10 @@ exports.generarTokenIntercambio = require("./generarTokenIntercambio").generarTo
 exports.validarTokenIntercambio = require("./validarTokenIntercambio").validarTokenIntercambio;
 exports.validarEnlaceCheckpoint = require("./enlacesCheckpoint").validarEnlaceCheckpoint;
 exports.consumirEnlaceCheckpoint = require("./enlacesCheckpoint").consumirEnlaceCheckpoint;
+
+// Espejos en vivo → ADREMATASA (2026-10-16)
+exports.espejoSolicitudesOperadores = require("./espejosAdrematasa").espejoSolicitudesOperadores;
+exports.espejoOperadores = require("./espejosAdrematasa").espejoOperadores;
+exports.espejoOrdenesTrabajo = require("./espejosAdrematasa").espejoOrdenesTrabajo;
+exports.espejoAsignaciones = require("./espejosAdrematasa").espejoAsignaciones;
+exports.espejoEstatusOperadores = require("./espejosAdrematasa").espejoEstatusOperadores;
