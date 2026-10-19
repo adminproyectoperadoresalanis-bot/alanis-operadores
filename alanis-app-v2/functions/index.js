@@ -227,3 +227,7 @@ exports.espejoOperadores = require("./espejosAdrematasa").espejoOperadores;
 exports.espejoOrdenesTrabajo = require("./espejosAdrematasa").espejoOrdenesTrabajo;
 exports.espejoAsignaciones = require("./espejosAdrematasa").espejoAsignaciones;
 exports.espejoEstatusOperadores = require("./espejosAdrematasa").espejoEstatusOperadores;
+
+exports.estatusOperadorPorOT = require("./estatusOperador").estatusOperadorPorOT;
+exports.estatusOperadorPorEvento = require("./estatusOperador").estatusOperadorPorEvento;
+exports.reportarTallerOperador = require("./estatusOperador").reportarTallerOperador;
