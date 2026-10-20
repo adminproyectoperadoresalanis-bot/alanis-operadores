@@ -66,9 +66,43 @@ service cloud.firestore {
       allow read, list: if isAdmin();
       allow write:      if isAdmin();
     }
+    // ---- Control de taller y Disponible (2026-10-19) ----
+    // Geocerca Patio NLD: centro 27.4343143, -99.5573444, ~300 m (caja de
+    // +-0.0027 lat / +-0.0031 lng; la app revisa el círculo exacto).
+    function otAbiertaOperador() {
+      let ref = /databases/$(database)/documents/estatus_operador/$(request.auth.uid);
+      return exists(ref) && get(ref).data.get('otsAbiertas', []).size() > 0;
+    }
+    function disponibleValido() {
+      let d = request.resource.data;
+      let num = get(/databases/$(database)/documents/usuarios/$(request.auth.uid)).data.get('numero', '');
+      return num is string && num.size() > 0
+        && exists(/databases/$(database)/documents/entradas_patio/$(num.trim().upper()))
+        && d.get('gps', null) is map
+        && d.gps.lat is number && d.gps.lng is number && d.gps.precision is number
+        && d.gps.precision <= 100
+        && d.gps.lat > 27.4316 && d.gps.lat < 27.4370
+        && d.gps.lng > -99.5605 && d.gps.lng < -99.5542;
+    }
+    function eventoOperadorPermitido() {
+      let est = request.resource.data.get('estatus', '');
+      return !otAbiertaOperador()
+        && est != 'liberado_taller'
+        && (est != 'disponible' || disponibleValido());
+    }
+    match /estatus_operador/{uid} {
+      allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+      allow write: if false;
+    }
+    match /entradas_patio/{unidad} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
     match /eventos/{id} {
       allow create: if request.auth != null
-                    && request.resource.data.uid == request.auth.uid;
+                    && request.resource.data.uid == request.auth.uid
+                    && eventoOperadorPermitido();
       allow read:   if request.auth.uid == resource.data.uid || isAdmin();
       allow list:   if isAdmin() || request.auth != null;
       allow update, delete: if isAdmin();

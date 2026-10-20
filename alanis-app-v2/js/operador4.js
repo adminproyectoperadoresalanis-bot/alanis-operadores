@@ -79,7 +79,7 @@ function normalizar(str) {
 // en cada deploy que quieras poder detectar, y actualiza version.json al
 // mismo valor.
 // ----------------------------------------------------------------------
-const APP_VERSION = "2026.09.12-1";
+const APP_VERSION = "2026.10.20-1";
 
 async function verificarActualizacionYReportarVersion(uid) {
   const footerVersion = document.getElementById('footer-version');
@@ -252,6 +252,7 @@ firebase.auth().onAuthStateChanged(async user => {
   iniciarReloj();
   buildStatusLists();
   mostrarNivel('seleccion');
+  iniciarEstatusServidor();
   cargarUltimoEstatus();
   cargarHistorial();
   cargarTarjetaQRIntercambio();
@@ -284,7 +285,11 @@ const ESTATUS_VIAJE = [
   { id:'arribo_destino',   label:'Arribo a destino',    desc:'Llegada al cliente',       color:'#27AE60', extra:'arribo' },
   { id:'fin_descarga',     label:'Fin de descarga',     desc:'Descarga completada',      color:'#16A085', extra:'fin_descarga' },
 ];
-const TODOS_ESTATUS = [...ESTATUS_PATIO, ...ESTATUS_VIAJE];
+// Estatus que solo escribe el servidor (2026-10-19): no se pueden elegir.
+const ESTATUS_SISTEMA = [
+  { id:'liberado_taller', label:'Liberado de taller', desc:'Ya puedes ponerte Disponible', color:'#3B7A1E', extra:null },
+];
+const TODOS_ESTATUS = [...ESTATUS_PATIO, ...ESTATUS_VIAJE, ...ESTATUS_SISTEMA];
 
 const EXTRA_HTML = {
   taller: function() {
@@ -396,6 +401,11 @@ function esPatioEstatus(id) {
 }
 
 function selectStatus(id) {
+  // Bloqueos (2026-10-19): con OT abierta no se elige ningún estatus; sin
+  // entrada a patio no se elige Disponible.
+  const b = calcularBloqueos();
+  if (b.taller) { showToast('Estás en taller: no puedes cambiar tu estatus hasta que terminen tu OT', true); switchTab('bloqueos'); return; }
+  if (id === 'disponible' && b.sinEntrada) { showToast('Sin entrada a patio: no puedes ponerte Disponible', true); switchTab('bloqueos'); return; }
   const esPatio = esPatioEstatus(id);
 
   if (esPatio) {
@@ -456,7 +466,7 @@ function renderFallasInline() {
   const searchEl = document.getElementById('search-falla-inline');
   const q = normalizar(searchEl ? searchEl.value : '');
   const filtered = FALLAS.filter(function(f) {
-    return normalizar(f.name).includes(q) || normalizar(f.cat).includes(q);
+    return normalizar(f.name).includes(q); // 2026-10-19: solo en la descripción, no en la familia
   });
   const SEVMAP = { alta:'sev-alta', media:'sev-media', baja:'sev-baja' };
   const SEVLBL = { alta:'Alta', media:'Media', baja:'Baja' };
@@ -511,14 +521,10 @@ async function cargarUltimoEstatus() {
       .where('uid', '==', currentUser.uid)
       .orderBy('timestamp', 'desc')
       .limit(1).get();
-    if (!snap.empty) {
-      const e = snap.docs[0].data();
-      const est = TODOS_ESTATUS.find(function(s) { return s.id === e.estatus; });
-      document.getElementById('ultimo-estatus-box').style.display = 'block';
-      document.getElementById('ultimo-dot').style.background = est ? est.color : '#888';
-      document.getElementById('ultimo-label').textContent = est ? est.label : e.estatus;
-      document.getElementById('ultimo-hora').textContent = e.fecha + ' ' + e.hora;
-    }
+    // 2026-10-19: el último estatus ya se muestra en el bloque de estatus de
+    // arriba (renderEstadoOperador); aquí solo se recuerda si fue de viaje.
+    ultimoEventoCategoria = snap.empty ? null : (snap.docs[0].data().categoria || null);
+    renderEstadoOperador();
   } catch(e) { console.log('Sin historial previo'); }
 }
 
@@ -531,21 +537,62 @@ async function enviarReporte() {
     showToast('Selecciona al menos un estatus de viaje', true); return;
   }
 
+  const bloq = calcularBloqueos();
+  if (bloq.taller) { showToast('Estás en taller: espera a que terminen tu OT', true); switchTab('bloqueos'); return; }
+  if (selectedPatio === 'disponible' && bloq.sinEntrada) { showToast('Sin entrada a patio: no puedes ponerte Disponible', true); switchTab('bloqueos'); return; }
+  if (selectedPatio === 'taller' && selectedFallasInline.size === 0) {
+    showToast('Selecciona al menos una falla de tu unidad', true); return;
+  }
+
   const btn = document.getElementById('btn-reporte');
   btn.disabled = true;
   btn.textContent = 'Enviando...';
+
+  // Taller (2026-10-19): lo registra el servidor (OT con folio consecutivo +
+  // evento) para que la OT lo deje en taller hasta que Operaciones la termine.
+  if (selectedPatio === 'taller') {
+    try {
+      const gpsT = await leerUbicacion(false).catch(function() { return null; });
+      const fallasT = Array.from(selectedFallasInline).map(function(id) {
+        return FALLAS.find(function(f) { return f.id === id; });
+      }).filter(Boolean).map(function(f) { return { id: f.id, cat: f.cat, name: f.name, sev: f.sev }; });
+      const res = await enlaceFn('reportarTallerOperador')({ fallas: fallasT, gps: gpsT });
+      showToast('Taller registrado · OT ' + res.data.folio);
+      limpiarSeleccionTrasEnvio();
+    } catch (e) {
+      console.error(e);
+      showToast((e && e.message) || 'No se pudo registrar el taller. Intenta de nuevo.', true);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Enviar estatus';
+    }
+    return;
+  }
 
   const now = new Date();
   const fecha = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0') + '-' + String(now.getDate()).padStart(2,'0');
   const hora  = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0');
 
   let gps = null;
-  try {
-    const pos = await new Promise(function(resolve, reject) {
-      navigator.geolocation.getCurrentPosition(resolve, reject, { timeout:5000 });
-    });
-    gps = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-  } catch(e) { gps = null; }
+  let distanciaPatioM = null;
+  if (selectedPatio === 'disponible') {
+    // Disponible (2026-10-19): GPS de alta precisión, dentro de la geocerca.
+    btn.textContent = 'Verificando ubicación...';
+    let lectura = null;
+    try { lectura = await leerUbicacion(true); } catch (e) { lectura = { error: e }; }
+    const chk = revisarGeocerca(lectura);
+    if (!chk.ok) {
+      mostrarModalUbicacion(chk);
+      btn.disabled = false;
+      btn.textContent = 'Enviar estatus';
+      return;
+    }
+    gps = lectura;
+    distanciaPatioM = chk.distancia;
+    btn.textContent = 'Enviando...';
+  } else {
+    gps = await leerUbicacion(false).catch(function() { return null; });
+  }
 
   // Construir label para historial
   const estatusIds = esCombinado ? selectedViaje : [selectedPatio];
@@ -568,12 +615,8 @@ async function enviarReporte() {
     viaje_id:  qrIdViaje || null,
     timestamp: firebase.firestore.FieldValue.serverTimestamp(),
   };
+  if (distanciaPatioM !== null) evento.distanciaPatioM = distanciaPatioM;
 
-  if (selectedStatus === 'taller') {
-    evento.fallas = Array.from(selectedFallasInline).map(function(id) {
-      return FALLAS.find(function(f) { return f.id === id; });
-    }).filter(Boolean);
-  }
   if (selectedStatus === 'enfermo') {
     evento.control_medico   = document.getElementById('enfermo-control') ? document.getElementById('enfermo-control').value.trim() : '';
     evento.dias_incapacidad = document.getElementById('enfermo-dias') ? document.getElementById('enfermo-dias').value : '';
@@ -602,41 +645,16 @@ async function enviarReporte() {
 
   try {
     await firebase.firestore().collection('eventos').add(evento);
-
-    // ── Crear OT automática si es taller con fallas ──
-    if (selectedStatus === 'taller' && evento.fallas && evento.fallas.length > 0) {
-      const anio = new Date().getFullYear();
-      const folio = 'OT-' + String(Math.floor(Math.random() * 900000) + 100000) + '-' + anio;
-      const tallerUnidadEl = document.getElementById('taller-unidad');
-      const unidadOT = tallerUnidadEl && tallerUnidadEl.value.trim() ? tallerUnidadEl.value.trim() : evento.numero;
-      await firebase.firestore().collection('ordenes_trabajo').add({
-        folio:     folio,
-        anio:      anio,
-        uid:       evento.uid,
-        operador:  evento.operador,
-        numero:    unidadOT,
-        unidad:    unidadOT,
-        fallas:    evento.fallas,
-        fecha:     evento.fecha,
-        hora:      evento.hora,
-        timestamp: firebase.firestore.FieldValue.serverTimestamp(),
-      });
-    }
-
     showToast('Estatus enviado: ' + estatusLabels);
-    selectedStatus = null;
-    selectedPatio = null;
-    selectedViaje = [];
-    selectedFallasInline.clear();
-    qrIdViaje = null;
-    document.querySelectorAll('.status-option').forEach(function(el) { el.classList.remove('selected'); });
-    document.querySelectorAll('.extra-inline').forEach(function(el) { el.classList.add('hidden'); el.innerHTML = ''; });
-    document.getElementById('qr-result').style.display = 'none';
-    cargarUltimoEstatus();
-    cargarHistorial();
+    limpiarSeleccionTrasEnvio();
   } catch(e) {
     console.error(e);
-    showToast('Error al enviar. Intenta de nuevo.', true);
+    if (e && e.code === 'permission-denied') {
+      showToast('No se pudo enviar: revisa tus Bloqueos', true);
+      switchTab('bloqueos');
+    } else {
+      showToast('Error al enviar. Intenta de nuevo.', true);
+    }
   } finally {
     btn.disabled = false;
     btn.textContent = 'Enviar estatus';
@@ -756,7 +774,7 @@ async function rechazarAsignacion(id) {
 }
 
 function switchTab(tab) {
-  ['reporte','asignaciones','historial','documentacion'].forEach(function(t) {
+  ['reporte','asignaciones','historial','documentacion','bloqueos'].forEach(function(t) {
     document.getElementById('tab-' + t).classList.add('hidden');
     document.getElementById('nav-' + t).classList.remove('active');
   });
@@ -764,6 +782,7 @@ function switchTab(tab) {
   document.getElementById('nav-' + tab).classList.add('active');
   if (tab === 'asignaciones') cargarAsignacionesOp();
   if (tab === 'documentacion') cargarTarjetaQRIntercambio();
+  if (tab === 'bloqueos') renderBloqueos();
   // Contenedor flotante solo en tab reporte
   const cont = document.getElementById('reporte-flotante');
   if (cont && tab !== 'reporte') { cont.classList.add('hidden'); cont.classList.remove('flotante'); }
@@ -1686,4 +1705,239 @@ async function cargarTarjetaQRIntercambio() {
     // depende de esta consulta) sigue funcionando igual.
     console.warn('No se pudo cargar la tarjeta de QR de intercambio:', e.message);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ESTATUS, BLOQUEOS Y GEOCERCA (2026-10-19, pedido de Ivan)
+// ═══════════════════════════════════════════════════════════════
+// - estatus_operador/{uid} (solo lo escribe el servidor): OTs abiertas y
+//   último estatus de patio. Con una OT abierta el operador queda EN TALLER
+//   y no puede elegir ningún estatus hasta que Operaciones la termine.
+// - entradas_patio/{UNIDAD}: entrada a patio según el último reporte pegado
+//   en ADREMATASA (Turnos). Sin entrada no se puede marcar Disponible.
+// - Disponible exige GPS de alta precisión (<= 100 m) dentro de la geocerca.
+// firestore.rules hace cumplir lo mismo, no solo esta pantalla.
+
+const GEOCERCA = { nombre: 'Patio NLD', lat: 27.4343143, lng: -99.5573444, radioM: 300 };
+const PRECISION_MAX_M = 100;
+const HORAS_VIGENCIA_CORTA = 4;
+
+let estadoServidor = null;       // datos de estatus_operador/{uid}
+let entradaPatio = undefined;    // undefined = cargando, null = sin entrada
+let ultimoEventoCategoria = null;
+let relojEstado = null;
+
+function unidadOperador() {
+  return String((userData && userData.numero) || '').trim().toUpperCase();
+}
+
+function iniciarEstatusServidor() {
+  firebase.firestore().collection('estatus_operador').doc(currentUser.uid).onSnapshot(function(s) {
+    estadoServidor = s.exists ? s.data() : {};
+    renderEstadoOperador();
+  }, function(e) { console.warn('estatus_operador:', e.message); estadoServidor = {}; renderEstadoOperador(); });
+
+  const unidad = unidadOperador();
+  if (unidad && unidad.indexOf('/') === -1) {
+    firebase.firestore().collection('entradas_patio').doc(unidad).onSnapshot(function(s) {
+      entradaPatio = s.exists ? s.data() : null;
+      renderEstadoOperador();
+    }, function(e) { console.warn('entradas_patio:', e.message); entradaPatio = null; renderEstadoOperador(); });
+  } else {
+    entradaPatio = null;
+  }
+  if (relojEstado) clearInterval(relojEstado);
+  relojEstado = setInterval(renderEstadoOperador, 60000); // para que "vence a las…" avance
+  renderEstadoOperador();
+}
+
+function calcularBloqueos() {
+  const ots = (estadoServidor && Array.isArray(estadoServidor.otsAbiertas)) ? estadoServidor.otsAbiertas : [];
+  return {
+    taller: ots.length > 0,
+    ots: ots,
+    sinEntrada: entradaPatio === null,
+    cargando: estadoServidor === null || entradaPatio === undefined,
+  };
+}
+
+function fechaHoraCortaOp(ms) {
+  if (!ms) return '—';
+  const d = new Date(ms);
+  const p = function(n) { return String(n).padStart(2, '0'); };
+  return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function horaOp(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function escOp(t) {
+  const d = document.createElement('div');
+  d.textContent = t == null ? '' : String(t);
+  return d.innerHTML;
+}
+
+function renderEstadoOperador() {
+  const cont = document.getElementById('estado-operador');
+  if (!cont) return;
+  const b = calcularBloqueos();
+  const ult = estadoServidor && estadoServidor.ultimo;
+  const enPatio = ultimoEventoCategoria !== 'viaje';
+  const bloqueado = b.taller || (b.sinEntrada && !b.cargando && enPatio);
+  document.body.classList.toggle('operador-bloqueado', bloqueado);
+
+  // Contador de la pestaña Bloqueos
+  const n = (b.taller ? 1 : 0) + (b.sinEntrada && !b.cargando ? 1 : 0);
+  const badge = document.getElementById('bloqueos-badge');
+  if (badge) { badge.textContent = n; badge.classList.toggle('hidden', n === 0); }
+
+  let html = '';
+  if (b.taller) {
+    const ot = b.ots[0];
+    html = '<div class="estado-op rojo"><div class="estado-op-t">⛔ EN TALLER</div>' +
+      '<div class="estado-op-s">OT ' + escOp(ot.folio || '') + ' · desde ' + fechaHoraCortaOp(ot.creadaMs) +
+      (b.ots.length > 1 ? ' · ' + b.ots.length + ' órdenes abiertas' : '') +
+      '<br>No puedes cambiar tu estatus hasta que Operaciones termine tu orden de trabajo.</div>' +
+      '<button type="button" class="estado-op-btn" onclick="switchTab(\'bloqueos\')">Ver mis BLOQUEOS ›</button></div>';
+  } else if (b.sinEntrada && !b.cargando && enPatio) {
+    html = '<div class="estado-op rojo"><div class="estado-op-t">⛔ SIN ENTRADA A PATIO</div>' +
+      '<div class="estado-op-s">Tu unidad no aparece en el último reporte de patio. Cuando registren tu entrada podrás ponerte Disponible.</div>' +
+      '<button type="button" class="estado-op-btn" onclick="switchTab(\'bloqueos\')">Ver mis BLOQUEOS ›</button></div>';
+  } else if (ult && ult.id === 'disponible') {
+    let t = '🟢 DISPONIBLE', s = 'Desde ' + fechaHoraCortaOp(ult.ms) + ' en ' + GEOCERCA.nombre, clase = 'verde';
+    if (userData && userData.tipoRuta === 'corta' && ult.ms) {
+      const vence = ult.ms + HORAS_VIGENCIA_CORTA * 3600 * 1000;
+      if (Date.now() > vence) {
+        t = '⚠️ DISPONIBLE VENCIDO'; clase = 'ambar';
+        s = 'Venció a las ' + horaOp(vence) + '. Vuelve a marcar Disponible para no perder tu lugar.';
+      } else {
+        t = '🟢 DISPONIBLE · vence ' + horaOp(vence);
+        s = 'Ruta corta · marcado ' + horaOp(ult.ms) + '. Reconfirma antes de las ' + horaOp(vence) + ' para no perder tu lugar.';
+      }
+    }
+    html = '<div class="estado-op ' + clase + '"><div class="estado-op-t">' + t + '</div><div class="estado-op-s">' + escOp(s) + '</div></div>';
+  } else if (ult && ult.id === 'liberado_taller') {
+    html = '<div class="estado-op verde"><div class="estado-op-t">✔ LIBERADO DE TALLER</div>' +
+      '<div class="estado-op-s">Tu unidad ya salió de taller (' + fechaHoraCortaOp(ult.ms) + '). Ponte Disponible cuando estés en el patio.</div></div>';
+  } else if (ult && ult.id) {
+    const est = TODOS_ESTATUS.find(function(s) { return s.id === ult.id; });
+    html = '<div class="estado-op neutro"><div class="estado-op-t"><span class="status-dot" style="background:' + (est ? est.color : '#888') + '"></span> ' +
+      escOp((est ? est.label : ult.id).toUpperCase()) + '</div><div class="estado-op-s">Desde ' + fechaHoraCortaOp(ult.ms) + '</div></div>';
+  }
+  cont.innerHTML = html;
+
+  // Candados en las opciones
+  ESTATUS_PATIO.concat(ESTATUS_VIAJE).forEach(function(s) {
+    const el = document.getElementById('opt-' + s.id);
+    if (!el) return;
+    let motivo = '';
+    if (b.taller) motivo = s.id === 'taller' ? 'Lo controla tu orden de trabajo' : 'Primero deben terminar tu OT';
+    else if (s.id === 'disponible' && b.sinEntrada && !b.cargando) motivo = 'Requiere entrada a patio';
+    el.classList.toggle('lock', !!motivo);
+    const desc = el.querySelector('.status-desc');
+    if (desc) desc.textContent = motivo || s.desc;
+  });
+
+  if (!document.getElementById('tab-bloqueos').classList.contains('hidden')) renderBloqueos();
+}
+
+function renderBloqueos() {
+  const el = document.getElementById('bloqueos-list');
+  if (!el) return;
+  const b = calcularBloqueos();
+  if (b.cargando) { el.innerHTML = '<p class="text-muted" style="text-align:center;padding:20px">Revisando…</p>'; return; }
+  let html = '';
+  if (b.taller) {
+    html += b.ots.map(function(ot) {
+      return '<div class="bloqueo-card"><div class="bloqueo-h">🔧 Unidad en taller</div>' +
+        '<div class="bloqueo-x"><b>OT ' + escOp(ot.folio) + '</b> · ' + fechaHoraCortaOp(ot.creadaMs) +
+        (ot.creadaDesde === 'app_operador' ? ' · reportada por ti' : (ot.creadoPorNombre ? ' · creada por ' + escOp(ot.creadoPorNombre) : '')) +
+        (ot.fallas && ot.fallas.length ? '<br>' + ot.fallas.map(function(f) { return '• ' + escOp(f); }).join('<br>') : '') + '</div>' +
+        '<div class="bloqueo-como">Se libera cuando el Coordinador de operadores marque la OT como <b>terminada</b>. Pregunta en taller cómo va tu unidad.</div></div>';
+    }).join('');
+  } else {
+    html += '<div class="bloqueo-ok"><span>✔</span><div><b>Sin órdenes de trabajo abiertas</b></div></div>';
+  }
+  if (b.sinEntrada) {
+    html += '<div class="bloqueo-card"><div class="bloqueo-h">🚧 Sin entrada a patio</div>' +
+      '<div class="bloqueo-x">Tu unidad ' + escOp(unidadOperador() || '(sin unidad registrada)') + ' no aparece en el último reporte de patio.</div>' +
+      '<div class="bloqueo-como">Cuando registren tu entrada a patio podrás ponerte Disponible. Si ya entraste, avisa a Operaciones.</div></div>';
+  } else {
+    html += '<div class="bloqueo-ok"><span>✔</span><div><b>Entrada a patio</b><br><small>Registrada ' + fechaHoraCortaOp(entradaPatio.fechaPatioMs) +
+      (entradaPatio.reporteMs ? ' · reporte de las ' + horaOp(entradaPatio.reporteMs) : '') + '</small></div></div>';
+  }
+  html += '<div class="bloqueo-ok"><span>📍</span><div><b>Ubicación</b><br><small>Se revisa al marcar Disponible: debes estar en ' + GEOCERCA.nombre + ' con la ubicación precisa activada.</small></div></div>';
+  el.innerHTML = html;
+}
+
+// ---- Ubicación y geocerca ----
+function leerUbicacion(precisa) {
+  return new Promise(function(resolve, reject) {
+    if (!navigator.geolocation) { reject({ code: 'sin_gps' }); return; }
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, precision: Math.round(pos.coords.accuracy) });
+    }, function(err) { reject(err); }, precisa
+      ? { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 }
+      : { timeout: 5000, maximumAge: 60000 });
+  });
+}
+
+function distanciaM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, rad = Math.PI / 180;
+  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return Math.round(2 * R * Math.asin(Math.sqrt(a)));
+}
+
+function revisarGeocerca(lectura) {
+  if (!lectura || lectura.error) {
+    const code = lectura && lectura.error && lectura.error.code;
+    return { ok: false, motivo: code === 1 ? 'permiso' : 'sin_lectura' };
+  }
+  const d = distanciaM(lectura.lat, lectura.lng, GEOCERCA.lat, GEOCERCA.lng);
+  if (lectura.precision > PRECISION_MAX_M) return { ok: false, motivo: 'imprecisa', precision: lectura.precision, distancia: d };
+  if (d > GEOCERCA.radioM) return { ok: false, motivo: 'fuera', precision: lectura.precision, distancia: d };
+  return { ok: true, precision: lectura.precision, distancia: d };
+}
+
+function mostrarModalUbicacion(chk) {
+  let modal = document.getElementById('modal-ubicacion');
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.id = 'modal-ubicacion';
+    modal.className = 'doc-modal-overlay';
+    document.body.appendChild(modal);
+  }
+  const km = function(m) { return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : m + ' m'; };
+  let cuerpo = '';
+  if (chk.motivo === 'permiso') {
+    cuerpo = '<p class="doc-modal-nota">La app no tiene permiso para ver tu ubicación. Actívalo en el navegador (candado junto a la dirección → Ubicación → Permitir) e intenta de nuevo.</p>';
+  } else if (chk.motivo === 'sin_lectura') {
+    cuerpo = '<p class="doc-modal-nota">No se pudo leer tu ubicación. Revisa que el GPS esté encendido, sal al aire libre unos segundos e intenta de nuevo.</p>';
+  } else {
+    cuerpo = '<div class="ubic-medidor"><span>Precisión del GPS</span><span class="' + (chk.motivo === 'imprecisa' ? 'ubic-malo' : '') + '">± ' + km(chk.precision) + '</span></div>' +
+      '<div class="ubic-medidor"><span>Distancia a ' + GEOCERCA.nombre + '</span><span class="' + (chk.motivo === 'fuera' ? 'ubic-malo' : '') + '">~ ' + km(chk.distancia) + '</span></div>' +
+      (chk.motivo === 'imprecisa'
+        ? '<p class="doc-modal-nota">Necesitamos tu ubicación exacta (menos de ' + PRECISION_MAX_M + ' m):<br>1. Activa la <b>Ubicación precisa</b> del celular (Android: Ajustes › Ubicación › Precisión de ubicación de Google).<br>2. Sal al aire libre unos segundos.<br>3. Intenta de nuevo.</p>'
+        : '<p class="doc-modal-nota">Para ponerte Disponible debes estar dentro de ' + GEOCERCA.nombre + '.</p>');
+  }
+  modal.innerHTML = '<div class="doc-modal-card"><h2>📡 No pudimos confirmar que estás en el patio</h2>' + cuerpo +
+    '<div class="doc-modal-actions"><button class="btn-secondary" onclick="document.getElementById(\'modal-ubicacion\').classList.add(\'hidden\')">Cancelar</button>' +
+    '<button class="btn-primary" onclick="document.getElementById(\'modal-ubicacion\').classList.add(\'hidden\');enviarReporte()">Intentar de nuevo</button></div></div>';
+  modal.classList.remove('hidden');
+}
+
+function limpiarSeleccionTrasEnvio() {
+  selectedStatus = null;
+  selectedPatio = null;
+  selectedViaje = [];
+  selectedFallasInline.clear();
+  qrIdViaje = null;
+  document.querySelectorAll('.status-option').forEach(function(el) { el.classList.remove('selected'); });
+  document.querySelectorAll('.extra-inline').forEach(function(el) { el.classList.add('hidden'); el.innerHTML = ''; });
+  document.getElementById('qr-result').style.display = 'none';
+  actualizarResumen();
+  cargarUltimoEstatus();
+  cargarHistorial();
 }
