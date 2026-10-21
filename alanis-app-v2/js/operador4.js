@@ -79,7 +79,7 @@ function normalizar(str) {
 // en cada deploy que quieras poder detectar, y actualiza version.json al
 // mismo valor.
 // ----------------------------------------------------------------------
-const APP_VERSION = "2026.10.20-1";
+const APP_VERSION = "2026.10.22-1";
 
 async function verificarActualizacionYReportarVersion(uid) {
   const footerVersion = document.getElementById('footer-version');
@@ -1805,7 +1805,7 @@ function renderEstadoOperador() {
       '<button type="button" class="estado-op-btn" onclick="switchTab(\'bloqueos\')">Ver mis BLOQUEOS ›</button></div>';
   } else if (ult && ult.id === 'disponible') {
     let t = '🟢 DISPONIBLE', s = 'Desde ' + fechaHoraCortaOp(ult.ms) + ' en ' + GEOCERCA.nombre, clase = 'verde';
-    if (userData && userData.tipoRuta === 'corta' && ult.ms) {
+    if (userData && (userData.tipoRuta === 'corta' || userData.tipoRuta === 'circuito') && ult.ms) {
       const vence = ult.ms + HORAS_VIGENCIA_CORTA * 3600 * 1000;
       if (Date.now() > vence) {
         t = '⚠️ DISPONIBLE VENCIDO'; clase = 'ambar';

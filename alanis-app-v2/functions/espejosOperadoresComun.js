@@ -24,7 +24,7 @@ const COL = {
 
 // "liberado_taller" (2026-10-19): lo escribe el servidor al terminar la última OT abierta.
 const ESTATUS_PATIO = ["disponible", "taller", "enfermo", "permiso", "vacaciones", "incapacitado", "liberado_taller"];
-const TIPOS_RUTA = ["larga", "corta", "local"];
+const TIPOS_RUTA = ["larga", "corta", "local", "circuito"]; // circuito: 2026-10-22
 
 function ms(ts) {
   if (!ts) return null;
