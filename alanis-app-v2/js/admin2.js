@@ -558,8 +558,13 @@ async function guardarAsignacion() {
 
     showToast('Asignación creada para ' + opData.nombre);
 
-    // Construir y abrir WhatsApp si el operador tiene teléfono
-    if (opData.telefono) {
+    // WhatsApp (2026-10-26): solo si se asigna desde un celular. Desde PC no se
+    // abre nada: el operador recibe el aviso push en su app (avisoAsignacion).
+    const esCelularWA = /iphone|ipad|ipod|android|mobi/i.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!esCelularWA) {
+      // Desde PC: sin WhatsApp.
+    } else if (opData.telefono) {
       const lada = opData.lada || '52';
       const numeroWA = lada + opData.telefono;
       const mensaje =
