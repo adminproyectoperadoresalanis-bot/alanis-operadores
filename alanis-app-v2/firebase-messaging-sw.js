@@ -12,17 +12,27 @@ importScripts("/__/firebase/9.23.0/firebase-app-compat.js");
 importScripts("/__/firebase/9.23.0/firebase-messaging-compat.js");
 importScripts("/__/firebase/init.js");
 
-// Clic en avisos que mostró la propia app (cuando estaba abierta).
-// Los avisos que llegan con la app cerrada los abre el SDK de Firebase.
+// Clic en CUALQUIER aviso (2026-10-26). Se registra antes que el de Firebase
+// y lo detiene (stopImmediatePropagation) para manejarlo aquí:
+// - si la app ya está abierta: le avisa (postMessage) a qué pantalla ir y la trae al frente;
+// - si está cerrada: la abre en el enlace del aviso (p. ej. operador.html#asignaciones).
 self.addEventListener("notificationclick", function (event) {
   var d = (event.notification && event.notification.data) || {};
-  if (d.FCM_MSG) return;
+  var fcm = d.FCM_MSG || null;
+  var link = d.link ||
+    (fcm && ((fcm.fcmOptions && fcm.fcmOptions.link) || (fcm.notification && fcm.notification.click_action))) ||
+    "/operador.html";
+  event.stopImmediatePropagation();
   event.notification.close();
-  var url = new URL(d.link || "/operador.html", self.location.origin).href;
+  var url = new URL(link, self.location.origin).href;
   event.waitUntil(
     clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (ventanas) {
       for (var i = 0; i < ventanas.length; i++) {
-        if (ventanas[i].url.indexOf(self.location.origin) === 0 && "focus" in ventanas[i]) return ventanas[i].focus();
+        var w = ventanas[i];
+        if (w.url.indexOf(self.location.origin) === 0 && "focus" in w) {
+          w.postMessage({ tipo: "alanis-aviso-click", link: url });
+          return w.focus();
+        }
       }
       return clients.openWindow(url);
     })

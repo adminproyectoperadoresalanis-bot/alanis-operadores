@@ -10,6 +10,10 @@
 //   la función registrarDispositivoAvisos y manda un aviso de prueba.
 // - Cada vez que abre la app revisa el token en silencio (puede cambiar).
 // - Solo en celulares (iPhone/iPad/Android): en computadora no hace nada.
+// - Al tocar un aviso de viaje (#asignaciones) abre la pestaña Asignaciones,
+//   esté la app cerrada o abierta (mensaje del service worker).
+// - Al iniciar sesión arranca la escucha de Asignaciones (contador en vivo
+//   desde que abre la app). En cualquier dispositivo.
 // Requiere cargar antes: firebase-app/auth/functions-compat, firebase-config.js
 // y firebase-messaging-compat.js (9.23.0).
 
@@ -39,6 +43,50 @@
   }
   function plataforma() {
     return esIOS() ? "ios" : (/android/i.test(navigator.userAgent) ? "android" : "otro");
+  }
+
+  // ---------- Pantalla Asignaciones (operador4.js) ----------
+  // currentUser, switchTab y cargarAsignacionesOp viven en operador4.js.
+  function appLista() {
+    return typeof currentUser !== "undefined" && currentUser &&
+      typeof switchTab === "function" && document.getElementById("nav-asignaciones");
+  }
+
+  // Espera (máx. ~30 s) a que operador4.js termine de arrancar y ejecuta fn.
+  function cuandoAppLista(fn) {
+    var intentos = 0;
+    (function revisarApp() {
+      if (appLista()) { setTimeout(fn, 400); return; }
+      if (++intentos < 100) setTimeout(revisarApp, 300);
+    })();
+  }
+
+  function limpiarHash() {
+    if (window.location.hash !== "#asignaciones") return;
+    try { history.replaceState(null, "", window.location.pathname + window.location.search); } catch (e) { /* nada */ }
+  }
+
+  function irAAsignaciones() {
+    cuandoAppLista(function () {
+      try { switchTab("asignaciones"); } catch (e) { console.warn("[avisos] switchTab:", e); }
+      limpiarHash();
+    });
+  }
+
+  function iniciarAsignacionesEnVivo() {
+    cuandoAppLista(function () {
+      if (typeof cargarAsignacionesOp === "function") {
+        try { cargarAsignacionesOp(); } catch (e) { console.warn("[avisos] asignaciones:", e); }
+      }
+    });
+  }
+
+  // La app ya estaba abierta y tocaron un aviso: el service worker nos avisa.
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.addEventListener("message", function (ev) {
+      var d = ev.data || {};
+      if (d.tipo === "alanis-aviso-click" && String(d.link || "").indexOf("#asignaciones") !== -1) irAAsignaciones();
+    });
   }
 
   // ---------- Cinta ----------
@@ -180,6 +228,8 @@
     quitarCinta();
     if (!user) { uidActual = null; return; }
     uidActual = user.uid;
+    iniciarAsignacionesEnVivo();
+    if (window.location.hash === "#asignaciones") irAAsignaciones();
     if (!esCelular()) return;
 
     if (!(await soportado())) {

@@ -9,7 +9,7 @@
 // - avisoPrueba (callable): manda un aviso de prueba a los teléfonos del
 //   propio usuario.
 // - avisoAsignacion (trigger): al crearse asignaciones/{id}, avisa al
-//   operador (uid_operador).
+//   operador (uid_operador). Al tocarlo abre la pestaña Asignaciones.
 // Los tokens que Firebase reporta como inválidos se borran solos.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
@@ -106,6 +106,7 @@ exports.avisoAsignacion = onDocumentCreated({ document: "asignaciones/{id}", reg
   const cita = textoCita(a.cita);
   if (cita) cuerpo += (cuerpo ? "\n" : "") + "Cita: " + cita;
 
-  const r = await enviarAUid(uid, "Nuevo viaje asignado", cuerpo || "Abre la app para ver el detalle.");
+  const r = await enviarAUid(uid, "Nuevo viaje asignado", cuerpo || "Abre la app para ver el detalle.",
+    LINK_OPERADOR + "#asignaciones");
   console.log("[avisos] asignacion", event.params.id, uid, JSON.stringify(r));
 });
