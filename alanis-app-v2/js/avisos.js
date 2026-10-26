@@ -12,6 +12,10 @@
 // - Solo en celulares (iPhone/iPad/Android): en computadora no hace nada.
 // - Al tocar un aviso de viaje (#asignaciones) abre la pestaña Asignaciones,
 //   esté la app cerrada o abierta (mensaje del service worker).
+// - Respaldo (iOS no siempre respeta el destino del aviso): al abrir o regresar
+//   a la app, si hay un viaje PENDIENTE que el operador no ha visto, cambia
+//   sola a Asignaciones (una vez por viaje). Si llega uno nuevo mientras usa
+//   la app, sale la cinta "Nuevo viaje asignado · Ver".
 // - Al iniciar sesión arranca la escucha de Asignaciones (contador en vivo
 //   desde que abre la app). En cualquier dispositivo.
 // Requiere cargar antes: firebase-app/auth/functions-compat, firebase-config.js
@@ -73,8 +77,91 @@
     });
   }
 
+  // ---------- Viaje nuevo: llevar a Asignaciones (2026-10-26) ----------
+  var CLAVE_VISTOS = "asig_vistos_";   // + uid: ids de viajes pendientes ya vistos
+  var ultimaLista = null;
+  var reanudadoMs = Date.now();
+  var envuelto = false;
+
+  function leerVistos() {
+    try { return JSON.parse(leer(CLAVE_VISTOS + uidActual) || "[]"); } catch (e) { return []; }
+  }
+  function marcarVistas(lista) {
+    var vistos = leerVistos();
+    (lista || []).forEach(function (a) {
+      if (a.estado === "pendiente" && vistos.indexOf(a.id) === -1) vistos.push(a.id);
+    });
+    guardar(CLAVE_VISTOS + uidActual, JSON.stringify(vistos.slice(-60)));
+  }
+  function pendientesNuevas(lista) {
+    var vistos = leerVistos();
+    return (lista || []).filter(function (a) { return a.estado === "pendiente" && vistos.indexOf(a.id) === -1; });
+  }
+  function enAsignaciones() {
+    var n = document.getElementById("nav-asignaciones");
+    return !!(n && n.classList.contains("active"));
+  }
+  function esVisible() { return document.visibilityState === "visible"; }
+  function textoViaje(a) {
+    var t = "Unidad " + (a.unidad || "?");
+    if (a.cliente) t += " · " + a.cliente;
+    if (a.destino) t += " → " + a.destino;
+    if (a.cita) t += " · Cita " + a.cita;
+    return t;
+  }
+  function verViajes() {
+    if (ultimaLista) marcarVistas(ultimaLista);
+    var c = document.getElementById("avisos-cinta");
+    if (c && c.getAttribute("data-viaje")) quitarCinta();
+    try { switchTab("asignaciones"); } catch (e) { console.warn("[avisos] switchTab:", e); }
+  }
+
+  function revisarViajesNuevos(origen) {
+    if (!ultimaLista || !uidActual || !esVisible()) return;
+    if (enAsignaciones()) { marcarVistas(ultimaLista); return; }
+    var nuevas = pendientesNuevas(ultimaLista);
+    if (!nuevas.length) return;
+    // Recién abierta o recién regresó a la app: directo a Asignaciones.
+    if (origen === "reanudar" || Date.now() - reanudadoMs < 10000) { verViajes(); return; }
+    // La estaba usando: no la movemos, solo avisamos.
+    var c = cinta("Nuevo viaje asignado", textoViaje(nuevas[0]),
+      [{ txt: "Ver", clase: "av-si", fn: verViajes },
+       { txt: "Después", clase: "av-no", fn: function () { marcarVistas(ultimaLista); quitarCinta(); } }]);
+    c.setAttribute("data-viaje", "1");
+  }
+
+  // Se engancha a las funciones de operador4.js sin modificar ese archivo.
+  function engancharOperador() {
+    if (envuelto) return;
+    if (typeof renderAsignacionesOp === "function") {
+      var renderOriginal = renderAsignacionesOp;
+      window.renderAsignacionesOp = function (lista) {
+        var r = renderOriginal.apply(this, arguments);
+        ultimaLista = lista;
+        revisarViajesNuevos("datos");
+        return r;
+      };
+    }
+    if (typeof switchTab === "function") {
+      var switchOriginal = switchTab;
+      window.switchTab = function (tab) {
+        var r = switchOriginal.apply(this, arguments);
+        if (tab === "asignaciones" && ultimaLista) marcarVistas(ultimaLista);
+        return r;
+      };
+    }
+    envuelto = true;
+  }
+
+  document.addEventListener("visibilitychange", function () {
+    if (!esVisible()) return;
+    reanudadoMs = Date.now();
+    revisarViajesNuevos("reanudar");
+  });
+
   function iniciarAsignacionesEnVivo() {
     cuandoAppLista(function () {
+      engancharOperador();
       if (typeof cargarAsignacionesOp === "function") {
         try { cargarAsignacionesOp(); } catch (e) { console.warn("[avisos] asignaciones:", e); }
       }
