@@ -65,6 +65,15 @@ service cloud.firestore {
     match /asignaciones/{id} {
       allow read, list: if isAdmin();
       allow write:      if isAdmin();
+      // Operador (2026-10-26): ve sus asignaciones y puede aceptar/rechazar.
+      allow read: if request.auth != null
+                  && resource.data.uid_operador == request.auth.uid;
+      allow update: if request.auth != null
+                    && resource.data.uid_operador == request.auth.uid
+                    && resource.data.estado == 'pendiente'
+                    && request.resource.data.estado in ['aceptada', 'rechazada']
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['estado', 'fecha_respuesta', 'motivo_rechazo']);
     }
     // ---- Control de taller y Disponible (2026-10-19) ----
     // Geocerca Patio NLD: centro 27.4343143, -99.5573444, ~300 m (caja de
