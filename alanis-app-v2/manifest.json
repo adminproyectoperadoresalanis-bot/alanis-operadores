@@ -1,6 +1,6 @@
 {
-  "name": "Autotransportes Alanís",
-  "short_name": "Alanís Op",
+  "name": "Autotransportes Alanis",
+  "short_name": "Alanis Op",
   "description": "Sistema de control de operadores de autotransporte",
   "start_url": "/index.html",
   "display": "standalone",
