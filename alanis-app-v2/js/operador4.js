@@ -79,7 +79,7 @@ function normalizar(str) {
 // en cada deploy que quieras poder detectar, y actualiza version.json al
 // mismo valor.
 // ----------------------------------------------------------------------
-const APP_VERSION = "2026.10.22-1";
+const APP_VERSION = "2026.10.26-1";
 
 async function verificarActualizacionYReportarVersion(uid) {
   const footerVersion = document.getElementById('footer-version');
@@ -700,19 +700,33 @@ async function cargarHistorial() {
 
 
 // ── ASIGNACIONES (OPERADOR) ───────────────────────────────────
-async function cargarAsignacionesOp() {
-  try {
-    const snap = await firebase.firestore().collection('asignaciones')
-      .where('uid_operador', '==', currentUser.uid)
-      .orderBy('timestamp', 'desc')
-      .limit(30).get();
-    const lista = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
-    const pendientes = lista.filter(function(a) { return a.estado === 'pendiente'; }).length;
-    const badge = document.getElementById('asig-op-badge');
-    if (pendientes > 0) { badge.classList.remove('hidden'); badge.textContent = pendientes; }
-    else badge.classList.add('hidden');
-    renderAsignacionesOp(lista);
-  } catch(e) { console.error('Error asignaciones op:', e); }
+// En vivo (2026-10-26): un solo listener por sesión; la lista y el contador se
+// actualizan solos cuando llega o cambia una asignación. Llamarla otra vez no
+// abre otro listener (solo lo reabre si cambió el usuario o si hubo error).
+let _asigOpUnsub = null;
+let _asigOpUid = null;
+function cargarAsignacionesOp() {
+  if (!currentUser) return;
+  if (_asigOpUnsub && _asigOpUid === currentUser.uid) return;
+  if (_asigOpUnsub) { _asigOpUnsub(); _asigOpUnsub = null; }
+  _asigOpUid = currentUser.uid;
+  _asigOpUnsub = firebase.firestore().collection('asignaciones')
+    .where('uid_operador', '==', currentUser.uid)
+    .orderBy('timestamp', 'desc')
+    .limit(30)
+    .onSnapshot(function(snap) {
+      const lista = snap.docs.map(function(d) { return Object.assign({ id: d.id }, d.data()); });
+      const pendientes = lista.filter(function(a) { return a.estado === 'pendiente'; }).length;
+      const badge = document.getElementById('asig-op-badge');
+      if (badge) {
+        if (pendientes > 0) { badge.classList.remove('hidden'); badge.textContent = pendientes; }
+        else badge.classList.add('hidden');
+      }
+      renderAsignacionesOp(lista);
+    }, function(e) {
+      console.error('Error asignaciones op:', e);
+      _asigOpUnsub = null;
+    });
 }
 
 function renderAsignacionesOp(lista) {
