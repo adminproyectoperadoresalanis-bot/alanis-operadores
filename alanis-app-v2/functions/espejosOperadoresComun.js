@@ -1,3 +1,7 @@
+// ##########################################################################
+// PROYECTO: ALANIS OPERADORES  (Codespace: alanis-operadores)
+// RUTA:     /workspaces/alanis-operadores/alanis-app-v2/functions/espejosOperadoresComun.js
+// ##########################################################################
 // ============================================================================
 // Espejos en vivo Alanis Operadores → ADREMATASA (2026-10-16).
 //
@@ -102,6 +106,12 @@ function asignacion(d) {
     motivoRechazo: txt(d.motivo_rechazo),
     creadaDesde: d.creadaDesde || null,
     timestampMs: ms(d.timestamp),
+    // Tráfico → Asignación (2026-10-27)
+    respuestaMs: ms(d.fecha_respuesta),
+    asignadoPorNombre: (d.asignadoPor && d.asignadoPor.nombre) || null,
+    canceladaMs: ms(d.canceladaEn),
+    canceladaPorNombre: (d.canceladaPor && d.canceladaPor.nombre) || null,
+    motivoCancelacion: txt(d.motivo_cancelacion),
   };
 }
 

@@ -10,10 +10,12 @@
 //   propio usuario.
 // - avisoAsignacion (trigger): al crearse asignaciones/{id}, avisa al
 //   operador (uid_operador). Al tocarlo abre la pestaña Asignaciones.
+// - avisoAsignacionCancelada (trigger, 2026-10-27): cuando Tráfico cancela una
+//   asignación pendiente (desde ADREMATASA), avisa "Viaje cancelado".
 // Los tokens que Firebase reporta como inválidos se borran solos.
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
-const { onDocumentCreated } = require("firebase-functions/v2/firestore");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const { getFirestore } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const crypto = require("crypto");
@@ -109,4 +111,21 @@ exports.avisoAsignacion = onDocumentCreated({ document: "asignaciones/{id}", reg
   const r = await enviarAUid(uid, "Nuevo viaje asignado", cuerpo || "Abre la app para ver el detalle.",
     LINK_OPERADOR + "#asignaciones");
   console.log("[avisos] asignacion", event.params.id, uid, JSON.stringify(r));
+});
+
+exports.avisoAsignacionCancelada = onDocumentUpdated({ document: "asignaciones/{id}", region: REGION }, async (event) => {
+  const antes = (event.data && event.data.before && event.data.before.data()) || {};
+  const despues = (event.data && event.data.after && event.data.after.data()) || {};
+  if (antes.estado !== "pendiente" || despues.estado !== "cancelada") return;
+  const uid = despues.uid_operador;
+  if (!uid) return;
+  const partes = [];
+  if (despues.unidad) partes.push("Unidad " + despues.unidad);
+  if (despues.cliente) partes.push(despues.cliente);
+  let cuerpo = partes.join(" · ");
+  if (despues.destino) cuerpo += (cuerpo ? " → " : "") + despues.destino;
+  if (despues.motivo_cancelacion) cuerpo += (cuerpo ? "\n" : "") + "Motivo: " + despues.motivo_cancelacion;
+  const r = await enviarAUid(uid, "Viaje cancelado", cuerpo || "Abre la app para ver el detalle.",
+    LINK_OPERADOR + "#asignaciones");
+  console.log("[avisos] cancelada", event.params.id, uid, JSON.stringify(r));
 });

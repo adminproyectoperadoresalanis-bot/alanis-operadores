@@ -235,3 +235,5 @@ exports.reportarTallerOperador = require("./estatusOperador").reportarTallerOper
 exports.registrarDispositivoAvisos = require("./avisosPush").registrarDispositivoAvisos;
 exports.avisoPrueba = require("./avisosPush").avisoPrueba;
 exports.avisoAsignacion = require("./avisosPush").avisoAsignacion;
+
+exports.avisoAsignacionCancelada = require("./avisosPush").avisoAsignacionCancelada;

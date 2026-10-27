@@ -79,7 +79,7 @@ function normalizar(str) {
 // en cada deploy que quieras poder detectar, y actualiza version.json al
 // mismo valor.
 // ----------------------------------------------------------------------
-const APP_VERSION = "2026.10.26-1";
+const APP_VERSION = "2026.10.27-1";
 
 async function verificarActualizacionYReportarVersion(uid) {
   const footerVersion = document.getElementById('footer-version');
@@ -735,7 +735,7 @@ function renderAsignacionesOp(lista) {
     el.innerHTML = '<p class="text-muted" style="text-align:center;padding:24px">Sin asignaciones por ahora.</p>';
     return;
   }
-  const ESTADO = { pendiente:'🟡 Pendiente', aceptada:'🟢 Aceptada', rechazada:'🔴 Rechazada' };
+  const ESTADO = { pendiente:'🟡 Pendiente', aceptada:'🟢 Aceptada', rechazada:'🔴 Rechazada', cancelada:'⚫ Cancelada' };
   el.innerHTML = lista.map(function(a) {
     let acciones = '';
     if (a.estado === 'pendiente') {
@@ -758,6 +758,7 @@ function renderAsignacionesOp(lista) {
       '</div>' +
       acciones +
       (a.motivo_rechazo ? '<div style="font-size:12px;color:var(--red);margin-top:8px">Motivo: ' + a.motivo_rechazo + '</div>' : '') +
+      (a.estado === 'cancelada' ? '<div style="font-size:12px;color:var(--text-secondary);margin-top:8px">Viaje cancelado por tráfico' + (a.motivo_cancelacion ? ': ' + a.motivo_cancelacion : '') + '</div>' : '') +
       '</div>';
   }).join('');
 }
