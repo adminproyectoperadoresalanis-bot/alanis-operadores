@@ -237,3 +237,6 @@ exports.avisoPrueba = require("./avisosPush").avisoPrueba;
 exports.avisoAsignacion = require("./avisosPush").avisoAsignacion;
 
 exports.avisoAsignacionCancelada = require("./avisosPush").avisoAsignacionCancelada;
+
+// Captura McCain desde Outlook (2026-11-25)
+Object.assign(exports, require("./correoMcCainOutlook"));
